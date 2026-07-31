@@ -85,6 +85,7 @@ Service contracts (trace propagation, log schema, fault-injection flags):
 
 ## Status
 
-Phase A in progress — core stack + Scenario Studio scaffolded; Motadata wiring (forge
-registration, macvlan device IPs, VyOS/snmpsim/softflowd) lands in Phases B/C.
-See [docs/PLAN.md](docs/PLAN.md).
+Phase A/B app core **complete and runnable** — all seven services, gateway, seeder, Locust,
+and Scenario Studio (API + UI) work end-to-end with `docker compose up`. Motadata wiring
+(forge registration, RUM SDK snippets, macvlan device IPs, VyOS/snmpsim/softflowd) lands in
+Phases B/C. See the status checklist in [docs/PLAN.md](docs/PLAN.md).

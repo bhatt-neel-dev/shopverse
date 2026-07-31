@@ -3,6 +3,29 @@
 Prereqs: one Ubuntu 24.04 VM (8 vCPU / 16 GB / 150 GB), SSH sudo access, ~20 free IPs on the
 appliance-reachable subnet, license headroom on 172.16.14.71 for ~20 monitors.
 
+## Current status (2026-07-31)
+
+The app-level core is **complete and runnable**: `cd deploy && docker compose up -d --build`
+brings up the full stack on any Docker host.
+
+- [x] Data tier (MySQL, PostgreSQL, MongoDB, Redis, RabbitMQ) + idempotent seeder (5k products)
+- [x] All seven services per docs/CONTRACTS.md — catalog (Java), order (Java), cart (Node),
+      search (Python), payment (Go), notify (Python worker), storefront (Next.js UI with
+      browse/search/product/cart/checkout pages)
+- [x] nginx gateway (`deploy/gateway`) with JSON access logs
+- [x] Trace propagation (`X-Trace-Id`), shared JSON log schema, and Redis-flag fault
+      injection in every HTTP service
+- [x] Scenario Studio API (`admin/api`): /inject, /traces/bulk, /load/spike, /logs/storm,
+      /chaos/{scenario} (docker-socket stop/start with auto-recover), /coverage, /history
+- [x] Scenario Studio UI (`admin/ui`): live scorecard + injection/traces/spike/storm/chaos
+      panels + scenario history table
+- [x] Locust baseline load (constant + diurnal profile)
+- [ ] Motadata wiring: `forge/register.py` (credential/discovery/policy registration), RUM
+      SDK snippets (placeholders are in both UIs), macvlan device IPs — **next up (Phase A
+      item 5 / Phase C)**
+- [ ] Network & device breadth: VyOS, softflowd/NetFlow, snmpsim fleet, trap replays (Phase C)
+- [ ] Forge one-YAML lifecycle (`render/deploy/register/verify/destroy`) (Phase D)
+
 ## Phase A — Core loop (first correlated data end-to-end)
 
 **Goal:** browser click → RUM → trace → logs → DB → metrics visible in Motadata, all correlated.
