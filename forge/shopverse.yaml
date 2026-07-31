@@ -1,0 +1,47 @@
+# ShopVerse forge config — single source of truth for the whole ecosystem.
+# Everything here is customizable; forge renders/deploys/registers from this file.
+
+site:
+  name: shopverse
+  vm: { host: <VM_IP>, ssh_user: <USER> }            # fill in when VM is allocated
+  appliance: { url: "https://172.16.14.71", pat_env: MOTADATA_PAT }
+  network:
+    macvlan_parent: eth0
+    device_ip_range: <FREE_RANGE e.g. 172.16.14.100-120>
+
+services: [storefront, catalog, order, cart, search, payment, notify]  # subset ok
+databases: [postgresql, mysql, mongodb, redis]       # pick 2..4
+queue: rabbitmq
+
+apm:
+  languages: auto          # derived from services
+  ebpf: [payment]
+rum:
+  apps:
+    - { name: storefront, type: nextjs, sample_rate: 100 }
+    - { name: scenario-studio, type: react, sample_rate: 100 }
+
+device_fleet:              # snmpsim identities (0 disables)
+  router: 1
+  switch: 2
+  firewall: 1
+  ups: 1
+  printer: 1
+  storage: 1
+vyos: true                 # NCCM + NetRoute + real router syslog/flows
+
+pipelines:
+  flows: netflow           # netflow | sflow | both | off
+  traps: true
+  nccm: true
+  netroute: true
+
+load:
+  profile: diurnal         # diurnal | constant | off
+  baseline_rps: 10
+  peak_rps: 40
+  browsers: 3              # real headless sessions for RUM
+
+chaos:
+  schedule: default        # default | off  (Scenario Studio can always fire manually)
+  dr_drill: weekly
