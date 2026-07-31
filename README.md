@@ -59,6 +59,32 @@ forge/      # shopverse.yaml config + Motadata auto-registration scripts
 docs/       # research + plans
 ```
 
+## Quickstart (any Docker host — laptop or VM)
+
+```bash
+git clone https://github.com/bhatt-neel-dev/shopverse.git && cd shopverse/deploy
+docker compose up -d --build     # first build takes a few minutes (Java + Node images)
+```
+
+| URL | What |
+|---|---|
+| http://localhost:3000 | **Storefront** — browse, search, cart, checkout |
+| http://localhost:9001 | **Scenario Studio** — injection, bulk traces, spikes, chaos, history |
+| http://localhost:8080 | API gateway (nginx) |
+| http://localhost:8089 | Locust (baseline load) |
+| http://localhost:15672 | RabbitMQ console (shop/shoppass) |
+
+On the target VM, use `deploy/bootstrap.sh` instead (also enables SNMP + syslog forwarding):
+
+```bash
+APPLIANCE_IP=172.16.14.71 bash deploy/bootstrap.sh
+```
+
+Service contracts (trace propagation, log schema, fault-injection flags):
+[docs/CONTRACTS.md](docs/CONTRACTS.md).
+
 ## Status
 
-Phase 0 — scaffold. See [docs/PLAN.md](docs/PLAN.md) for the build phases.
+Phase A in progress — core stack + Scenario Studio scaffolded; Motadata wiring (forge
+registration, macvlan device IPs, VyOS/snmpsim/softflowd) lands in Phases B/C.
+See [docs/PLAN.md](docs/PLAN.md).

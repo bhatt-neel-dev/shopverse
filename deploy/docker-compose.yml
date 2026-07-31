@@ -1,0 +1,194 @@
+name: shopverse
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: shopverse-mysql
+    environment:
+      MYSQL_DATABASE: shopverse
+      MYSQL_USER: shop
+      MYSQL_PASSWORD: shoppass
+      MYSQL_ROOT_PASSWORD: rootpass
+    volumes: [mysql-data:/var/lib/mysql]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pshoppass", "-ushop"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres:
+    image: postgres:16
+    container_name: shopverse-postgres
+    environment:
+      POSTGRES_DB: shopverse
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shoppass
+    volumes: [pg-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shopverse"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mongo:
+    image: mongo:7
+    container_name: shopverse-mongo
+    volumes: [mongo-data:/data/db]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping:1}).ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: shopverse-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: shopverse-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: shop
+      RABBITMQ_DEFAULT_PASS: shoppass
+    ports: ["15672:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  seed:
+    build: ./seed
+    container_name: shopverse-seed
+    environment: &db-env
+      MYSQL_HOST: mysql
+      MYSQL_DB: shopverse
+      MYSQL_USER: shop
+      MYSQL_PASSWORD: shoppass
+      PG_HOST: postgres
+      PG_DB: shopverse
+      PG_USER: shop
+      PG_PASSWORD: shoppass
+      MONGO_URL: mongodb://mongo:27017/shopverse
+      REDIS_URL: redis://redis:6379
+      RABBIT_URL: amqp://shop:shoppass@rabbitmq:5672/
+    depends_on:
+      mysql: {condition: service_healthy}
+      mongo: {condition: service_healthy}
+    restart: "no"
+
+  catalog:
+    build: ../services/catalog
+    container_name: shopverse-catalog
+    environment:
+      <<: *db-env
+      SVC_NAME: catalog
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      seed: {condition: service_completed_successfully}
+
+  order:
+    build: ../services/order
+    container_name: shopverse-order
+    environment:
+      <<: *db-env
+      SVC_NAME: order
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  cart:
+    build: ../services/cart
+    container_name: shopverse-cart
+    environment:
+      <<: *db-env
+      SVC_NAME: cart
+    depends_on:
+      redis: {condition: service_healthy}
+
+  search:
+    build: ../services/search
+    container_name: shopverse-search
+    environment:
+      <<: *db-env
+      SVC_NAME: search
+    depends_on:
+      mongo: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      seed: {condition: service_completed_successfully}
+
+  payment:
+    build: ../services/payment
+    container_name: shopverse-payment
+    environment:
+      <<: *db-env
+      SVC_NAME: payment
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  notify:
+    build: ../services/notify
+    container_name: shopverse-notify
+    environment:
+      <<: *db-env
+      SVC_NAME: notify
+    depends_on:
+      rabbitmq: {condition: service_healthy}
+
+  gateway:
+    build: ./gateway
+    container_name: shopverse-gateway
+    ports: ["8080:8080"]
+    depends_on: [catalog, order, cart, search, payment]
+
+  storefront:
+    build: ../services/storefront
+    container_name: shopverse-storefront
+    environment:
+      GATEWAY_URL: http://gateway:8080
+      SVC_NAME: storefront
+    ports: ["3000:3000"]
+    depends_on: [gateway]
+
+  studio-api:
+    build: ../admin/api
+    container_name: shopverse-studio-api
+    environment:
+      <<: *db-env
+      SVC_NAME: studio-api
+      GATEWAY_URL: http://gateway:8080
+    ports: ["9000:9000"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - studio-data:/data
+    depends_on: [gateway]
+
+  studio-ui:
+    build: ../admin/ui
+    container_name: shopverse-studio-ui
+    ports: ["9001:9001"]
+    depends_on: [studio-api]
+
+  locust:
+    build: ../loadgen
+    container_name: shopverse-locust
+    environment:
+      GATEWAY_URL: http://gateway:8080
+      LOAD_PROFILE: constant
+      BASELINE_USERS: "5"
+    ports: ["8089:8089"]
+    depends_on: [gateway]
+
+volumes:
+  mysql-data:
+  pg-data:
+  mongo-data:
+  studio-data:
