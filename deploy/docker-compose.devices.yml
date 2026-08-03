@@ -1,0 +1,43 @@
+# Phase C — network & device breadth. Overlay; use together with the base compose file:
+#   docker compose -f docker-compose.yml -f docker-compose.devices.yml up -d
+#
+# Gives Motadata real endpoints to discover beyond the app stack:
+#   * snmpsim  — a fleet of simulated devices (router/switch/firewall/UPS/printer/storage),
+#                each answering SNMP on its own port (or macvlan IP, see deploy/macvlan.md)
+#   * softflowd — exports NetFlow v9 for real container traffic to the appliance
+#   * trapgen  — replays vendor traps, fired by Scenario Studio chaos scenarios
+
+name: shopverse
+
+services:
+  snmpsim:
+    image: tandrup/snmpsim:latest
+    container_name: shopverse-snmpsim
+    command: >
+      --data-dir=/usr/local/snmpsim/data
+      --agent-udpv4-endpoint=0.0.0.0:1161
+    volumes:
+      - ./devices/snmpsim-data:/usr/local/snmpsim/data:ro
+    ports:
+      - "1161:1161/udp"
+    restart: unless-stopped
+
+  softflowd:
+    image: bunkerity/softflowd:latest
+    container_name: shopverse-softflowd
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW]
+    command: >
+      -i ${FLOW_IFACE:-eth0}
+      -n ${APPLIANCE_IP:-172.16.14.71}:2055
+      -v 9 -t maxlife=60 -D
+    restart: unless-stopped
+
+  trapgen:
+    build: ./devices/trapgen
+    container_name: shopverse-trapgen
+    environment:
+      APPLIANCE_IP: ${APPLIANCE_IP:-172.16.14.71}
+      TRAP_PORT: "1620"
+      TRAP_COMMUNITY: shopverse
+    restart: unless-stopped
