@@ -13,6 +13,16 @@ services: [storefront, catalog, order, cart, search, payment, notify]  # subset 
 databases: [postgresql, mysql, mongodb, redis]       # pick 2..4
 queue: rabbitmq
 
+# Consumed by forge/register.py. Values must match what the VM/stack actually accepts:
+# the SSH user is the VM login; DB users/passwords come from deploy/docker-compose.yml.
+# Keep real secrets out of git — override via a local, git-ignored copy of this file.
+credentials:
+  shopverse-linux-ssh: { username: <VM_SSH_USER>, password: <VM_SSH_PASSWORD> }
+  shopverse-snmp:      { community: shopverse }
+  shopverse-postgres:  { username: shop, password: shoppass }
+  shopverse-mysql:     { username: shop, password: shoppass }
+  shopverse-mongo:     { username: "", password: "" }   # seeded Mongo has auth disabled
+
 apm:
   languages: auto          # derived from services
   ebpf: [payment]

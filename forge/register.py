@@ -35,6 +35,14 @@ class Motadata:
         r.raise_for_status()
         return r.json().get("result", [])
 
+    def get_safe(self, path: str):
+        """Lookups must never abort a run: an unknown/renamed endpoint degrades to 'not found'."""
+        try:
+            return self.get(path)
+        except Exception as e:  # noqa: BLE001
+            print(f"  ~ lookup {path} failed ({type(e).__name__}); assuming not present")
+            return []
+
     def post(self, path: str, payload: dict):
         if self.dry_run:
             print(f"  [dry-run] POST {path}: {json.dumps(payload)[:160]}")
@@ -45,7 +53,9 @@ class Motadata:
         return r.json()
 
     def find_by(self, path: str, field: str, value: str):
-        for row in self.get(path) or []:
+        if self.dry_run:
+            return None
+        for row in self.get_safe(path) or []:
             if isinstance(row, dict) and row.get(field) == value:
                 return row
         return None
