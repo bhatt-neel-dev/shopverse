@@ -35,8 +35,12 @@ public class RabbitPublisher {
                     json.getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             channel = null;
+            // Many AMQP failures carry a null message (auth, vhost, socket) — without the
+            // class name the log says nothing about why publishing broke.
+            String detail = e.getClass().getSimpleName()
+                    + (e.getMessage() == null ? "" : ": " + e.getMessage());
             JsonLog.emit("ERROR", TraceFilter.SVC, "failed to publish order event", traceId,
-                    null, null, 0, 0, orderId, null, e.getMessage());
+                    null, null, 0, 0, orderId, null, detail);
         }
     }
 

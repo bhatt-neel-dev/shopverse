@@ -55,7 +55,7 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: shop
       RABBITMQ_DEFAULT_PASS: shoppass
-    ports: ["15672:15672"]
+    ports: ["${RABBITMQ_UI_PORT:-15672}:15672"]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -76,7 +76,7 @@ services:
       PG_PASSWORD: shoppass
       MONGO_URL: mongodb://mongo:27017/shopverse
       REDIS_URL: redis://redis:6379
-      RABBIT_URL: amqp://shop:shoppass@rabbitmq:5672/
+      RABBIT_URL: amqp://shop:shoppass@rabbitmq:5672/%2F
     depends_on:
       mysql: {condition: service_healthy}
       mongo: {condition: service_healthy}
@@ -146,7 +146,7 @@ services:
   gateway:
     build: ./gateway
     container_name: shopverse-gateway
-    ports: ["8080:8080"]
+    ports: ["${GATEWAY_PORT:-8080}:8080"]
     depends_on: [catalog, order, cart, search, payment]
 
   storefront:
@@ -155,7 +155,7 @@ services:
     environment:
       GATEWAY_URL: http://gateway:8080
       SVC_NAME: storefront
-    ports: ["3000:3000"]
+    ports: ["${STOREFRONT_PORT:-3000}:3000"]
     depends_on: [gateway]
 
   studio-api:
@@ -165,7 +165,7 @@ services:
       <<: *db-env
       SVC_NAME: studio-api
       GATEWAY_URL: http://gateway:8080
-    ports: ["9000:9000"]
+    ports: ["${STUDIO_API_PORT:-9100}:9000"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - studio-data:/data
@@ -174,7 +174,7 @@ services:
   studio-ui:
     build: ../admin/ui
     container_name: shopverse-studio-ui
-    ports: ["9001:9001"]
+    ports: ["${STUDIO_UI_PORT:-9001}:9001"]
     depends_on: [studio-api]
 
   locust:
@@ -184,7 +184,7 @@ services:
       GATEWAY_URL: http://gateway:8080
       LOAD_PROFILE: constant
       BASELINE_USERS: "5"
-    ports: ["8089:8089"]
+    ports: ["${LOCUST_PORT:-8089}:8089"]
     depends_on: [gateway]
 
 volumes:

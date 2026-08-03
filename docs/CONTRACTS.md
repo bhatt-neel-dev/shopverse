@@ -40,7 +40,8 @@ MYSQL_HOST=mysql MYSQL_DB=shopverse MYSQL_USER=shop MYSQL_PASSWORD=shoppass
 PG_HOST=postgres PG_DB=shopverse PG_USER=shop PG_PASSWORD=shoppass
 MONGO_URL=mongodb://mongo:27017/shopverse
 REDIS_URL=redis://redis:6379
-RABBIT_URL=amqp://shop:shoppass@rabbitmq:5672/
+RABBIT_URL=amqp://shop:shoppass@rabbitmq:5672/%2F   # %2F = default vhost "/";
+#   a bare trailing slash means EMPTY vhost and the Java client rejects it
 GATEWAY_URL=http://gateway:8080          # storefront/loadgen only
 SVC_NAME=<svc>                            # used for injection keys + logs
 ```
