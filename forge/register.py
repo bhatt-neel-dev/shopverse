@@ -1,24 +1,59 @@
-"""Register the ShopVerse ecosystem in Motadata ObserveOps — idempotent.
+"""One-shot onboarding of the ShopVerse ecosystem into a fresh Motadata instance.
 
-Creates credential profiles, discovery profiles, a JSON log parser for ShopVerse service logs,
-trap listeners, and RUM/APM application registrations. Safe to re-run: every object is looked up
-by name first and reused if present.
+Idempotent: every object is looked up by name and reused, so re-running is safe and only
+creates what is missing. Field names follow forge/API_GROUND_TRUTH.md (captured from a live
+appliance) — not the UI labels, which differ.
+
+Order matters: credentials must exist before discoveries (which reference credential *ids*),
+and parsers before log collectors.
 
 Usage:
-    export MOTADATA_PAT=<personal access token from Settings > Personal Access Token>
-    python register.py --config shopverse.yaml [--dry-run]
+    export MOTADATA_PAT=<Settings > User Settings > Personal Access Token>
+    python register.py --config shopverse.yaml            # create everything
+    python register.py --config shopverse.yaml --dry-run  # print payloads, touch nothing
+    python register.py --config shopverse.yaml --run-discovery   # also kick off discovery
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+
+import requests
 import urllib3
 import yaml
-import requests
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# object.type -> (discovery category, default port, credential key in config)
+DB_TYPES = {
+    "postgresql": ("PostgreSQL", "Database", 5432, "shopverse-postgres"),
+    "mysql": ("MySQL", "Database", 3306, "shopverse-mysql"),
+    "mongodb": ("MongoDB", "Database", 27017, "shopverse-mongo"),
+}
+
+CREDENTIAL_SPECS = {
+    "shopverse-linux-ssh": ("SSH", lambda c: {
+        "username": c.get("username", ""), "password": c.get("password", ""),
+        "cli.enabled": "no"}),
+    "shopverse-snmp": ("SNMP V1/V2c", lambda c: {
+        "snmp.version": "v2c", "community": c.get("community", "public")}),
+    "shopverse-postgres": ("JDBC", lambda c: {
+        "username": c.get("username", ""), "password": c.get("password", "")}),
+    "shopverse-mysql": ("JDBC", lambda c: {
+        "username": c.get("username", ""), "password": c.get("password", "")}),
+    "shopverse-mongo": ("JDBC", lambda c: {
+        "username": c.get("username", ""), "password": c.get("password", "")}),
+}
+
+# Baseline policies. entities=[] means "all monitors".
+POLICIES = [
+    ("shopverse-cpu-critical", "Metric Threshold", "system.cpu.percent", ">=", "85"),
+    ("shopverse-memory-critical", "Metric Threshold", "system.memory.used.percent", ">=", "90"),
+    ("shopverse-disk-critical", "Metric Threshold", "system.disk.used.percent", ">=", "85"),
+]
 
 
 class Motadata:
@@ -30,155 +65,175 @@ class Motadata:
         self.s.headers.update({"Authorization": f"Bearer {token}",
                                "Content-Type": "application/json"})
 
-    def get(self, path: str, **kw):
-        r = self.s.get(f"{self.base}/api/v1{path}", timeout=60, **kw)
+    def get(self, path: str):
+        r = self.s.get(f"{self.base}/api/v1{path}", timeout=90)
         r.raise_for_status()
         return r.json().get("result", [])
 
     def get_safe(self, path: str):
-        """Lookups must never abort a run: an unknown/renamed endpoint degrades to 'not found'."""
+        """A failed lookup must not abort the run — it degrades to 'not present'."""
         try:
             return self.get(path)
         except Exception as e:  # noqa: BLE001
-            print(f"  ~ lookup {path} failed ({type(e).__name__}); assuming not present")
+            print(f"    ~ lookup {path} failed ({type(e).__name__}); assuming empty")
             return []
 
     def post(self, path: str, payload: dict):
         if self.dry_run:
-            print(f"  [dry-run] POST {path}: {json.dumps(payload)[:160]}")
-            return {"dry_run": True}
-        r = self.s.post(f"{self.base}/api/v1{path}", json=payload, timeout=120)
-        if r.status_code >= 400:
-            raise RuntimeError(f"POST {path} -> {r.status_code}: {r.text[:400]}")
-        return r.json()
-
-    def find_by(self, path: str, field: str, value: str):
-        if self.dry_run:
+            print(f"    [dry-run] POST {path}")
+            print(f"      {json.dumps(payload)[:400]}")
             return None
-        for row in self.get_safe(path) or []:
-            if isinstance(row, dict) and row.get(field) == value:
-                return row
-        return None
+        r = self.s.post(f"{self.base}/api/v1{path}", json=payload, timeout=180)
+        if r.status_code >= 400:
+            raise RuntimeError(f"POST {path} -> {r.status_code}: {r.text[:500]}")
+        body = r.json()
+        return body.get("result", body)
 
 
-def ensure(md: Motadata, kind: str, path: str, name_field: str, name: str, payload: dict):
-    existing = md.find_by(path, name_field, name)
-    if existing:
-        print(f"  = {kind} '{name}' already exists")
-        return existing
-    md.post(path, payload)
-    print(f"  + {kind} '{name}' created")
-    return {"name": name}
+def ensure(md: Motadata, path: str, name_field: str, name: str, payload: dict, kind: str):
+    """Create `payload` unless an object with the same name exists. Returns its id (or None)."""
+    for row in (md.get_safe(path) if not md.dry_run else []):
+        if isinstance(row, dict) and row.get(name_field) == name:
+            print(f"    = {kind} '{name}' exists (id {row.get('id')})")
+            return row.get("id")
+    result = md.post(path, payload)
+    new_id = None
+    if isinstance(result, dict):
+        new_id = result.get("id")
+    elif isinstance(result, list) and result and isinstance(result[0], dict):
+        new_id = result[0].get("id")
+    print(f"    + {kind} '{name}' created" + (f" (id {new_id})" if new_id else ""))
+    return new_id
 
 
-CREDENTIALS = [
-    # (name, protocol, extra fields) — passwords come from the config file
-    ("shopverse-linux-ssh", "SSH", {}),
-    ("shopverse-snmp", "SNMP V1/V2c", {}),
-    ("shopverse-postgres", "JDBC", {}),
-    ("shopverse-mysql", "JDBC", {}),
-    ("shopverse-mongo", "JDBC", {}),
-]
-
-
-def register_credentials(md: Motadata, cfg: dict):
-    print("credential profiles:")
-    creds = cfg.get("credentials", {})
-    for name, protocol, extra in CREDENTIALS:
-        c = creds.get(name, {})
-        if not c:
-            print(f"  ! {name}: no entry in config.credentials — skipped")
+def register_credentials(md: Motadata, cfg: dict) -> dict[str, int]:
+    print("\n[1/5] credential profiles")
+    configured = cfg.get("credentials", {})
+    ids: dict[str, int] = {}
+    for name, (protocol, ctx_fn) in CREDENTIAL_SPECS.items():
+        entry = configured.get(name)
+        if entry is None:
+            print(f"    ! {name}: absent from config.credentials — skipped")
+            continue
+        if any("<" in str(v) for v in entry.values()):
+            print(f"    ! {name}: placeholder value still in config — skipped")
             continue
         payload = {
             "credential.profile.name": name,
             "credential.profile.protocol": protocol,
-            "credential.profile.context": {
-                "user.name": c.get("username", ""),
-                "password": c.get("password", ""),
-                **({"community": c["community"]} if "community" in c else {}),
-                **extra,
-            },
+            "credential.profile.context": ctx_fn(entry),
         }
-        ensure(md, "credential", "/settings/credential-profiles",
-               "credential.profile.name", name, payload)
+        cid = ensure(md, "/settings/credential-profiles",
+                     "credential.profile.name", name, payload, "credential")
+        if cid:
+            ids[name] = cid
+    return ids
 
 
-def register_discoveries(md: Motadata, cfg: dict):
-    print("discovery profiles:")
+def register_discoveries(md: Motadata, cfg: dict, cred_ids: dict[str, int]) -> list[int]:
+    print("\n[2/5] discovery profiles")
     host = cfg["site"]["vm"]["host"]
-    dbs = set(cfg.get("databases", []))
-    profiles = [
-        ("shopverse-host-linux", "Linux", host, "shopverse-linux-ssh", 22),
-        ("shopverse-host-snmp", "Linux (SNMP)", host, "shopverse-snmp", 161),
+    targets = [
+        ("shopverse-host-linux", "Linux", "Server", 22, "shopverse-linux-ssh"),
+        ("shopverse-host-snmp", "Linux (SNMP)", "Network", 161, "shopverse-snmp"),
     ]
-    db_map = {
-        "postgresql": ("PostgreSQL", 5432, "shopverse-postgres"),
-        "mysql": ("MySQL", 3306, "shopverse-mysql"),
-        "mongodb": ("MongoDB", 27017, "shopverse-mongo"),
+    for db in cfg.get("databases", []):
+        if db in DB_TYPES:
+            obj_type, category, port, cred = DB_TYPES[db]
+            targets.append((f"shopverse-{db}", obj_type, category, port, cred))
+
+    created = []
+    for name, obj_type, category, port, cred_name in targets:
+        cred_id = cred_ids.get(cred_name)
+        if cred_id is None and not md.dry_run:
+            print(f"    ! {name}: credential '{cred_name}' unavailable — skipped")
+            continue
+        payload = {
+            "discovery.name": name,
+            "discovery.type": "ip.address",
+            "discovery.target": host,
+            "discovery.target.name": host,
+            "discovery.category": category,
+            "discovery.object.type": obj_type,
+            "discovery.context": {"port": port, "ping.check.status": "yes"},
+            "discovery.credential.profiles": [cred_id] if cred_id else [],
+            "discovery.groups": [],
+            "discovery.user.tags": [],
+            "discovery.exclude.targets": [],
+            "discovery.exclude.target.type": "ip.address",
+            "discovery.config.management.status": "no",
+            "discovery.scheduler": "no",
+        }
+        did = ensure(md, "/settings/discoveries", "discovery.name", name, payload, "discovery")
+        if did:
+            created.append(did)
+    return created
+
+
+def register_log_parser(md: Motadata, cfg: dict) -> int | None:
+    print("\n[3/5] log parser")
+    payload = {
+        "log.parser.name": "ShopVerse JSON",
+        "log.parser.type": "json",
+        "log.parser.source.type": "Other",
+        "log.parser.condition": "all",
+        "log.parser.condition.keywords": [],
+        "log.parser.date.time.format": "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+        "log.parser.date.time.formatter.type": "formatter",
+        # matches the one-JSON-line-per-request schema in docs/CONTRACTS.md
+        "log.parser.fields": [
+            {"log.parser.field.name": f, "log.parser.field.type": t,
+             "log.parser.field.value": ""}
+            for f, t in [("ts", "timestamp"), ("level", "none"), ("svc", "none"),
+                         ("msg", "none"), ("trace_id", "none"), ("status", "none"),
+                         ("latency_ms", "none"), ("order_id", "none"), ("user_id", "none")]
+        ],
     }
-    for db in dbs:
-        if db in db_map:
-            obj_type, port, cred = db_map[db]
-            profiles.append((f"shopverse-{db}", obj_type, host, cred, port))
+    return ensure(md, "/settings/log-parsers", "log.parser.name",
+                  "ShopVerse JSON", payload, "log parser")
 
-    for name, obj_type, target, cred, port in profiles:
+
+def register_policies(md: Motadata, cfg: dict):
+    print("\n[4/5] policies")
+    for name, ptype, metric, condition, threshold in POLICIES:
         payload = {
-            "discovery.profile.name": name,
-            "object.type": obj_type,
-            "discovery.profile.context": {"host": target, "port": port},
-            "credential.profiles": [cred],
-            "discovery.profile.auto.provision": True,
+            "policy.name": name,
+            "policy.type": ptype,
+            "policy.state": "yes",
+            "policy.title": "$$$severity$$$ - $$$object.name$$$",
+            "policy.message": ("$$$counter$$$ has entered into $$$severity$$$ state with value "
+                               "$$$value$$$ on $$$object.host$$$($$$object.ip$$$)"),
+            "policy.context": {
+                "metric": metric,
+                "filters": {"data.filter": {}},
+                "entities": [],
+                "policy.severity": {
+                    "CRITICAL": {"policy.condition": condition, "policy.threshold": threshold}
+                },
+                "policy.trigger.time": 300,
+                "policy.trigger.occurrences": 1,
+                "policy.auto.clear.timer.seconds": 0,
+            },
+            "policy.actions": {"Integration": {}, "Notification": {"Email": {}, "channels": {}}},
+            "policy.archived": "no",
+            "policy.renotify": "no",
+            "policy.scheduled": "no",
         }
-        ensure(md, "discovery", "/settings/discoveries", "discovery.profile.name", name, payload)
+        ensure(md, "/settings/metric-policies", "policy.name", name, payload, "policy")
 
 
-SHOPVERSE_LOG_PARSER = {
-    "log.parser.name": "ShopVerse JSON",
-    "log.parser.type": "JSON",
-    "log.parser.context": {
-        # Matches docs/CONTRACTS.md log schema
-        "timestamp.field": "ts",
-        "timestamp.format": "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
-        "severity.field": "level",
-        "message.field": "msg",
-        "fields": ["svc", "trace_id", "method", "path", "status",
-                   "latency_ms", "order_id", "user_id", "err"],
-    },
-}
-
-
-def register_log_parser(md: Motadata, cfg: dict):
-    print("log parser:")
-    ensure(md, "log parser", "/settings/log-parsers", "log.parser.name",
-           "ShopVerse JSON", SHOPVERSE_LOG_PARSER)
-
-
-def register_rum_apps(md: Motadata, cfg: dict):
-    print("RUM applications:")
-    for app in cfg.get("rum", {}).get("apps", []):
-        name = app["name"]
-        payload = {
-            "rum.application.name": name,
-            "rum.application.type": app.get("type", "react"),
-            "rum.application.version": app.get("version", "1.0.0"),
-            "rum.application.environment": app.get("environment", "lab"),
-            "rum.application.session.sample.rate": app.get("sample_rate", 100),
-            "rum.application.privacy": app.get("privacy", "allow"),
-        }
-        ensure(md, "RUM app", "/settings/rum-applications", "rum.application.name", name, payload)
-
-
-def register_trap_listeners(md: Motadata, cfg: dict):
-    if not cfg.get("pipelines", {}).get("traps"):
+def run_discoveries(md: Motadata, discovery_ids: list[int]):
+    print("\n[5/5] running discoveries")
+    if md.dry_run:
+        print(f"    [dry-run] would run {len(discovery_ids)} discovery profile(s)")
         return
-    print("trap listeners:")
-    for name, version, port in [("shopverse-trap-v2c", "V1/V2c", 1620),
-                                ("shopverse-trap-v3", "V3", 1630)]:
-        payload = {"snmp.trap.listener.name": name,
-                   "snmp.trap.listener.version": version,
-                   "snmp.trap.listener.port": port}
-        ensure(md, "trap listener", "/settings/snmp-trap-listeners",
-               "snmp.trap.listener.name", name, payload)
+    for did in discovery_ids:
+        try:
+            md.post(f"/settings/discoveries/{did}/run", {})
+            print(f"    > discovery {did} started")
+        except Exception as e:  # noqa: BLE001 — endpoint shape unconfirmed
+            print(f"    ! could not start discovery {did}: {str(e)[:160]}")
+            print("      run it from Settings > Discovery Profile instead")
 
 
 def main():
@@ -186,28 +241,35 @@ def main():
     ap.add_argument("--config", default="shopverse.yaml")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--token", default=None, help="overrides $MOTADATA_PAT")
+    ap.add_argument("--run-discovery", action="store_true",
+                    help="start each discovery profile after creating it")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
     site = cfg["site"]
-    import os
     token = args.token or os.environ.get(site["appliance"].get("pat_env", "MOTADATA_PAT"), "")
     if not token and not args.dry_run:
-        sys.exit("no token: set $MOTADATA_PAT or pass --token (or use --dry-run)")
+        sys.exit("no token: set $MOTADATA_PAT, pass --token, or use --dry-run")
     if "<" in str(site["vm"]["host"]):
         sys.exit("fill in site.vm.host in the config first")
 
     md = Motadata(site["appliance"]["url"], token, args.dry_run)
-    print(f"appliance {site['appliance']['url']} (dry-run={args.dry_run})\n")
+    print(f"target appliance: {site['appliance']['url']}  (dry-run={args.dry_run})")
 
-    register_credentials(md, cfg)
-    register_discoveries(md, cfg)
+    cred_ids = register_credentials(md, cfg)
+    discovery_ids = register_discoveries(md, cfg, cred_ids)
     register_log_parser(md, cfg)
-    register_rum_apps(md, cfg)
-    register_trap_listeners(md, cfg)
+    register_policies(md, cfg)
+    if args.run_discovery:
+        run_discoveries(md, discovery_ids)
 
-    print("\ndone. Next: verify discovery ran (Settings > Discovery Profile > Run) and that "
-          "monitors were provisioned, then attach policies.")
+    print("\ndone.")
+    print("Not yet automated (REST endpoints unconfirmed — see forge/API_GROUND_TRUTH.md):")
+    print("  * SNMP trap listeners   — Settings > SNMP Trap > SNMP Trap Listener")
+    print("  * RUM/APM app registration — Settings > Real User Monitoring / APM")
+    print("  * dashboards and SLO profiles")
+    if not args.run_discovery:
+        print("\nNext: Settings > Discovery Profile > Run (or re-run with --run-discovery).")
 
 
 if __name__ == "__main__":
