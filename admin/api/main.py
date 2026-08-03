@@ -15,6 +15,7 @@ import injection
 import journeys
 import loadspike
 import logstorm
+import traps
 from logconf import setup_logging
 
 logger = setup_logging()
@@ -203,6 +204,31 @@ async def chaos_stop(scenario: str):
     except RuntimeError as e:
         raise HTTPException(409, str(e))
     history.append("chaos.stop", {"scenario": scenario}, result)
+    return result
+
+
+# ---- trap bursts (Phase C device overlay) -----------------------------------
+
+class TrapBody(BaseModel):
+    trap: str = "linkDown"
+    count: int = Field(1, ge=1, le=500)
+    interval_s: float = Field(0.2, ge=0.0, le=10.0)
+
+
+@app.get("/traps")
+async def traps_status():
+    return {"available": await traps.available(), "traps": traps.KNOWN_TRAPS}
+
+
+@app.post("/traps/burst")
+async def traps_burst(body: TrapBody):
+    try:
+        result = await traps.burst(body.trap, body.count, body.interval_s)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001 — trapgen not deployed
+        raise HTTPException(502, f"trapgen unreachable ({e}); start the device overlay")
+    history.append("traps.burst", body.model_dump(), result)
     return result
 
 
