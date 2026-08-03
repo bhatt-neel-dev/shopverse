@@ -20,11 +20,23 @@ brings up the full stack on any Docker host.
 - [x] Scenario Studio UI (`admin/ui`): live scorecard + injection/traces/spike/storm/chaos
       panels + scenario history table
 - [x] Locust baseline load (constant + diurnal profile)
-- [ ] Motadata wiring: `forge/register.py` (credential/discovery/policy registration), RUM
-      SDK snippets (placeholders are in both UIs), macvlan device IPs — **next up (Phase A
-      item 5 / Phase C)**
-- [ ] Network & device breadth: VyOS, softflowd/NetFlow, snmpsim fleet, trap replays (Phase C)
+- [x] `forge/register.py` — idempotent Motadata registration (credential profiles, discovery
+      profiles with auto-provision, ShopVerse JSON log parser, RUM apps, trap listeners);
+      `--dry-run` supported. **Untested against the appliance — needs the VM + a PAT.**
+- [x] Phase C device layer scaffolded: `deploy/docker-compose.devices.yml` (snmpsim fleet,
+      softflowd NetFlow export, trapgen), `deploy/devices/trapgen` (HTTP-triggered vendor
+      trap replays), `deploy/macvlan.md` (per-component LAN IPs)
+- [x] Studio trap bursts: `GET /traps`, `POST /traps/burst` → trapgen
+- [ ] snmpsim `.snmprec` recordings — `deploy/devices/snmpsim-data/` is empty; needs public
+      snapshots or recordings from real devices before the fleet answers
+- [ ] VyOS container (NCCM backup target, NetRoute hops, real router syslog)
+- [ ] RUM SDK snippets — placeholders sit in both UIs; needs the real SDK from the appliance
+- [ ] Motadata policies/dashboards/SLOs (register.py covers onboarding only)
 - [ ] Forge one-YAML lifecycle (`render/deploy/register/verify/destroy`) (Phase D)
+
+**Verified locally (2026-08-03):** `docker compose up -d --build` builds and starts on a Docker
+host. One real bug found and fixed during verification — `services/cart` had no
+`package-lock.json`, so its `npm ci` build step failed.
 
 ## Phase A — Core loop (first correlated data end-to-end)
 
