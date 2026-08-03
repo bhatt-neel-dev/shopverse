@@ -1,0 +1,30 @@
+# Use prebuilt images from a registry instead of building on the host.
+# Required on hosts that cannot reach the internet (see docs/OFFLINE_DEPLOY.md): the VM can
+# neither pull base images nor run the Maven/npm/pip steps a build needs.
+#
+#   REGISTRY=10.20.40.88:5005 docker compose \
+#     -f docker-compose.yml -f docker-compose.registry.yml up -d
+#
+# The registry must be in the daemon's insecure-registries list when served over plain HTTP.
+
+name: shopverse
+
+services:
+  mysql:      { image: "${REGISTRY}/mysql:8.4" }
+  postgres:   { image: "${REGISTRY}/postgres:16" }
+  mongo:      { image: "${REGISTRY}/mongo:7" }
+  redis:      { image: "${REGISTRY}/redis:7-alpine" }
+  rabbitmq:   { image: "${REGISTRY}/rabbitmq:3.13-management-alpine" }
+
+  seed:       { image: "${REGISTRY}/shopverse-seed:latest",       build: !reset null }
+  catalog:    { image: "${REGISTRY}/shopverse-catalog:latest",    build: !reset null }
+  order:      { image: "${REGISTRY}/shopverse-order:latest",      build: !reset null }
+  cart:       { image: "${REGISTRY}/shopverse-cart:latest",       build: !reset null }
+  search:     { image: "${REGISTRY}/shopverse-search:latest",     build: !reset null }
+  payment:    { image: "${REGISTRY}/shopverse-payment:latest",    build: !reset null }
+  notify:     { image: "${REGISTRY}/shopverse-notify:latest",     build: !reset null }
+  gateway:    { image: "${REGISTRY}/shopverse-gateway:latest",    build: !reset null }
+  storefront: { image: "${REGISTRY}/shopverse-storefront:latest", build: !reset null }
+  studio-api: { image: "${REGISTRY}/shopverse-studio-api:latest", build: !reset null }
+  studio-ui:  { image: "${REGISTRY}/shopverse-studio-ui:latest",  build: !reset null }
+  locust:     { image: "${REGISTRY}/shopverse-locust:latest",     build: !reset null }
