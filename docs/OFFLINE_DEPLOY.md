@@ -107,6 +107,36 @@ sudo usermod -aG docker $USER     # re-login for this to take effect
 
 Gives Docker 29.1.3 and Compose 2.40.3, both new enough.
 
+## 8. Cut the dev machine out of the loop (do this once it works)
+
+Steps 1–7 leave the VM depending on a laptop. Give the VM its own registry so it can restart and
+rebuild on its own:
+
+```bash
+# on the VM — registry:2 itself has to come from the dev registry first
+sudo docker pull 10.20.40.88:5005/registry:2
+sudo docker tag  10.20.40.88:5005/registry:2 registry:2
+sudo docker run -d --name shopverse-local-registry -p 5000:5000 --restart unless-stopped \
+  -v /var/lib/shopverse-registry:/var/lib/registry registry:2
+
+# re-tag every already-pulled image into the local registry (all local, so it is fast)
+for i in mysql:8.4 postgres:16 mongo:7 redis:7-alpine rabbitmq:3.13-management-alpine \
+         shopverse-{catalog,order,cart,search,payment,notify,storefront,gateway,studio-api,studio-ui,locust,seed}:latest; do
+  sudo docker tag "10.20.40.88:5005/${i}" "localhost:5000/${i}"
+  sudo docker push "localhost:5000/${i}"
+done
+```
+
+Then add `localhost:5000` to `insecure-registries`, restart Docker, and point the stack at it:
+
+```bash
+printf 'REGISTRY=localhost:5000\nSTUDIO_API_PORT=9100\n' > ~/shopverse/deploy/.env
+sudo docker compose -f docker-compose.yml -f docker-compose.registry.yml up -d
+```
+
+Verified on 2026-08-03: with the dev-machine registry stopped, the VM still recreates containers
+and comes back healthy. The dev registry is now only needed to ship **new** image builds.
+
 ## The better long-term fix
 
 Ask the network team to allow HTTPS egress to `registry-1.docker.io`, `auth.docker.io`, and
