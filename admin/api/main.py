@@ -15,6 +15,7 @@ import injection
 import journeys
 import loadspike
 import logstorm
+import motadata
 import traps
 from logconf import setup_logging
 
@@ -230,6 +231,64 @@ async def traps_burst(body: TrapBody):
         raise HTTPException(502, f"trapgen unreachable ({e}); start the device overlay")
     history.append("traps.burst", body.model_dump(), result)
     return result
+
+
+# ---- Motadata auto-configuration --------------------------------------------
+
+DEFAULT_DATABASES = ["postgresql", "mysql", "mongodb"]
+
+
+class MotadataTokenBody(BaseModel):
+    token: str | None = None
+
+
+class MotadataConfigureBody(BaseModel):
+    only: str | None = Field(None, description="configure just this item key; omit for all")
+    databases: list[str] = DEFAULT_DATABASES
+    ssh_user: str = "motadata"
+    ssh_password: str = "motadata"
+    snmp_community: str = "shopverse"
+
+    def credentials(self) -> dict:
+        return {"ssh_user": self.ssh_user, "ssh_password": self.ssh_password,
+                "snmp_community": self.snmp_community}
+
+
+@app.get("/motadata/status")
+async def motadata_status(databases: str = ",".join(DEFAULT_DATABASES)):
+    dbs = [d.strip() for d in databases.split(",") if d.strip()]
+    return await motadata.status({}, dbs)
+
+
+@app.post("/motadata/token")
+async def motadata_token(body: MotadataTokenBody):
+    motadata.set_token(body.token)
+    history.append("motadata.token", {"set": bool(body.token)}, {"has_token": bool(body.token)})
+    return motadata.configured_appliance()
+
+
+@app.post("/motadata/configure")
+async def motadata_configure(body: MotadataConfigureBody):
+    try:
+        result = await motadata.configure(body.credentials(), body.databases, body.only)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001 — appliance unreachable etc.
+        raise HTTPException(502, f"appliance error: {e}")
+    history.append("motadata.configure", body.model_dump(), result["counts"])
+    return result
+
+
+@app.post("/motadata/discovery/{name}/run")
+async def motadata_run_discovery(name: str):
+    try:
+        result = await motadata.run_discovery(name)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"appliance error: {e}")
+    history.append("motadata.discovery.run", {"name": name}, result or {"started": True})
+    return {"started": name}
 
 
 # ---- coverage + history -----------------------------------------------------

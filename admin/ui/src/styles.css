@@ -303,3 +303,40 @@ button.danger:hover {
   color: var(--muted);
   word-break: break-word;
 }
+
+/* --- Motadata configuration panel --- */
+.mota-appliance {
+  display: flex; justify-content: space-between; align-items: center; gap: .75rem;
+  font-size: .8rem; color: var(--muted); margin-bottom: .6rem;
+}
+.mota-token { display: flex; gap: .5rem; margin-bottom: .75rem; }
+.mota-token input { flex: 1; }
+.mota-summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: .9rem;
+}
+.mota-summary button { margin-left: auto; }
+.mota-summary button.ghost { margin-left: 0; }
+.mota-group { margin-bottom: 1rem; }
+.mota-group h3 {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); margin: .5rem 0 .35rem;
+}
+.mota-table { width: 100%; border-collapse: collapse; }
+.mota-table td {
+  padding: .45rem .4rem; border-top: 1px solid var(--border); vertical-align: middle;
+}
+.mota-name { display: flex; flex-direction: column; }
+.mota-name span { font-size: .74rem; color: var(--muted); }
+.mota-detail { font-size: .74rem; color: var(--muted); margin-left: .5rem; }
+.mota-actions { text-align: right; white-space: nowrap; }
+.mota-actions button { margin-left: .35rem; }
+
+.chip {
+  display: inline-block; padding: .12rem .5rem; border-radius: 999px;
+  font-size: .72rem; font-weight: 600; border: 1px solid transparent;
+}
+.chip.active         { background: rgba(34,197,94,.15);  color: #4ade80; border-color: rgba(34,197,94,.35); }
+.chip.configured     { background: rgba(59,130,246,.15); color: #60a5fa; border-color: rgba(59,130,246,.35); }
+.chip.not_configured { background: rgba(148,163,184,.12); color: #94a3b8; border-color: rgba(148,163,184,.3); }
+.chip.error          { background: rgba(239,68,68,.15);  color: #f87171; border-color: rgba(239,68,68,.35); }
+.chip.unknown        { background: rgba(234,179,8,.12);  color: #facc15; border-color: rgba(234,179,8,.3); }

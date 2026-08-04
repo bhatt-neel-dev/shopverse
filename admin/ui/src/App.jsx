@@ -3,6 +3,7 @@ import { api } from "./api";
 import ChaosPanel from "./panels/ChaosPanel";
 import HistoryPanel from "./panels/HistoryPanel";
 import InjectionPanel from "./panels/InjectionPanel";
+import MotadataPanel from "./panels/MotadataPanel";
 import Scorecard from "./panels/Scorecard";
 import SpikePanel from "./panels/SpikePanel";
 import StormPanel from "./panels/StormPanel";
@@ -41,6 +42,8 @@ export default function App() {
       </header>
 
       <Scorecard />
+
+      <MotadataPanel onAction={onAction} />
 
       <div className="panel-grid">
         <InjectionPanel onAction={onAction} />
