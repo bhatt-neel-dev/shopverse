@@ -196,6 +196,19 @@ services:
     ports: ["${LOCUST_PORT:-8089}:8089"]
     depends_on: [gateway]
 
+  logship:
+    build: ./logship
+    container_name: shopverse-logship
+    environment:
+      APPLIANCE_IP: "${APPLIANCE_IP:-172.16.14.71}"
+      SYSLOG_PORT: "${SYSLOG_PORT:-514}"
+      SYSLOG_PROTO: "${SYSLOG_PROTO:-udp}"
+      SOURCE_HOST: "${MOTADATA_TARGET_HOST:-172.20.21.25}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+    depends_on: [gateway]
+
 volumes:
   mysql-data:
   pg-data:

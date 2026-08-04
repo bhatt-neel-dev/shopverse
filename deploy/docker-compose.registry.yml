@@ -28,3 +28,4 @@ services:
   studio-api: { image: "${REGISTRY}/shopverse-studio-api:latest", build: !reset null }
   studio-ui:  { image: "${REGISTRY}/shopverse-studio-ui:latest",  build: !reset null }
   locust:     { image: "${REGISTRY}/shopverse-locust:latest",     build: !reset null }
+  logship:    { image: "${REGISTRY}/shopverse-logship:latest",    build: !reset null }
