@@ -350,6 +350,11 @@ def _state_of(item: dict, row: dict | None) -> tuple[str, str]:
             provisioned = item.get("_provisioned")
             if provisioned is None:
                 return ACTIVE, f"{found} object(s) discovered"
+            monitors = item.get("_monitors")
+            if monitors == 0:
+                return CONFIGURED, f"{found} discovered, no monitor created yet"
+            if monitors:
+                return ACTIVE, f"monitoring ({monitors} monitor(s))"
             if provisioned == 0:
                 return CONFIGURED, f"{found} discovered, none provisioned yet"
             if provisioned < found:
@@ -414,6 +419,12 @@ async def status(appliance: dict, databases: list[str], credentials: dict | None
                 objs = await client.get(f"{DISCOVERY_PATH}/{row['id']}/result")
                 item["_provisioned"] = sum(
                     1 for o in objs if str(o.get("object.state", "")).upper() == "PROVISION")
+                obj_type = (item.get("discovery") or {}).get("obj_type")
+                ip = str((objs[0] if objs else {}).get("object.ip", "")) or \
+                    str(appliance.get("target_host", ""))
+                mons = await monitors_for(appliance, ip)
+                item["_monitors"] = sum(1 for m in mons
+                                        if str(m.get("object.type")) == obj_type)
             except Exception:  # noqa: BLE001 — counts are a nicety, not worth failing the board
                 pass
         state, detail = (_state_of(item, row) if reachable or cache[path]
@@ -487,6 +498,17 @@ async def configure(appliance: dict, databases: list[str], only: str | None = No
             "counts": {"created": len(created), "skipped": len(skipped), "failed": len(failed)}}
 
 
+async def monitors_for(appliance: dict, ip: str) -> list[dict]:
+    """Monitors the appliance actually holds for an IP — the only reliable proof of success."""
+    client = MotaClient(appliance)
+    async with client._client() as c:  # noqa: SLF001 — same module
+        r = await c.post(f"{client.base}/api/v1/settings/objects/search",
+                         json={"search": ip, "page.size": 100})
+        r.raise_for_status()
+        items = ((r.json() or {}).get("result") or {}).get("items") or []
+    return [m for m in items if str(m.get("object.ip")) == ip]
+
+
 async def discovery_results(appliance: dict, name: str) -> tuple[int, list[dict]]:
     """(discovery id, discovered objects) for a profile."""
     client = MotaClient(appliance)
@@ -506,13 +528,36 @@ async def provision(appliance: dict, name: str) -> dict:
         raise RuntimeError("no personal access token set for this appliance")
     client = MotaClient(appliance)
     discovery_id, objects = await discovery_results(appliance, name)
-    pending = [o for o in objects if str(o.get("object.state", "")).upper() != "PROVISION"]
+    # object.state can read PROVISION while no monitor was ever created (a name collision
+    # that the appliance swallowed), so verify against the real inventory.
+    host_ip = str((objects[0] if objects else {}).get("object.ip", "")) or \
+        str(appliance.get("target_host", ""))
+    existing = {str(m.get("object.type")) for m in await monitors_for(appliance, host_ip)}
+
+    pending = [o for o in objects
+               if str(o.get("object.state", "")).upper() != "PROVISION"
+               or str(o.get("object.type")) not in existing]
     if not pending:
         return {"discovery": name, "provisioned": 0, "already": len(objects)}
+
+    # Every profile targeting one host discovers it under the same object.name (the hostname),
+    # so the first provision claims that name and the rest silently no-op — 200 "started
+    # successfully", state never leaves UNPROVISION. Qualify the name per profile.
+    suffix = name.replace("shopverse-", "").replace("host-", "")
+    renamed = []
+    for obj in pending:
+        copy = dict(obj)
+        base = str(obj.get("object.name") or obj.get("object.host") or obj.get("object.ip", ""))
+        if suffix and not base.endswith(suffix):
+            copy["object.name"] = f"{base}-{suffix}"
+        renamed.append(copy)
+
     await client.post("/settings/objects/provision",
-                      {"params": pending, "id": discovery_id,
+                      {"params": renamed, "id": discovery_id,
                        "ui.event.uuid": uuid.uuid4().hex})
-    return {"discovery": name, "provisioned": len(pending), "already": len(objects) - len(pending)}
+    return {"discovery": name, "provisioned": len(renamed),
+            "already": len(objects) - len(renamed),
+            "names": [o["object.name"] for o in renamed]}
 
 
 async def provision_all(appliance: dict, databases: list[str]) -> dict:

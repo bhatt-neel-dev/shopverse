@@ -263,3 +263,21 @@ So: a 200 from this endpoint means *queued*, not *done*, and the queue can fail 
 Always verify by polling `object.state` **and** confirming the monitor exists via
 `POST /settings/objects/search`. When both stall, the problem is appliance-side (provisioning
 worker / collector), not the request.
+
+#### The silent no-op is an `object.name` collision
+
+Root cause of the section above, found by Neel. Every discovery profile pointed at one host
+returns the object under the **same `object.name`** — the hostname. The first profile to be
+provisioned claims that name; every later one is rejected as a duplicate, and the rejection is
+silent: `200 "Object provisioning started successfully"`, no toast, `object.state` unchanged.
+
+Fix: qualify `object.name` per profile before posting, e.g. `shopverse-linux`,
+`shopverse-snmp`. The rest of the row is echoed back unchanged.
+
+Verified: with unique names, all four monitors appear and poll **Up** —
+`shopverse-linux` (Linux), `shopverse-snmp` (Linux (SNMP)), `shopverse` (MySQL),
+`172.20.21.25` (MongoDB).
+
+Also note `POST /settings/objects/search` accepts a **`search`** term
+(`{"search": "shopverse", "page.size": 100}`). Use it — walking pages client-side is slow and
+easy to get wrong.
