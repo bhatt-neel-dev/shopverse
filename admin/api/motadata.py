@@ -270,8 +270,11 @@ def build_items(credentials: dict, databases: list[str]) -> list[dict]:
         ("shopverse-linux-ssh", "SSH", "Linux host over SSH",
          {"username": credentials.get("ssh_user", "motadata"),
           "password": credentials.get("ssh_password", "motadata"), "cli.enabled": "no"}),
+        # the community key is snmp.community — a plain "community" is silently accepted and
+        # then sent as an EMPTY community, which every agent rejects
         ("shopverse-snmp", "SNMP V1/V2c", "Host + simulated devices over SNMP",
-         {"snmp.version": "v2c", "community": credentials.get("snmp_community", "shopverse")}),
+         {"snmp.version": "v2c",
+          "snmp.community": credentials.get("snmp_community", "shopverse")}),
     ]
     for db in databases:
         if db in DB_SPECS:

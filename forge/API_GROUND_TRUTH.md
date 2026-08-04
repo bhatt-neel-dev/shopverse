@@ -186,3 +186,33 @@ recreating it. Credential profiles, discoveries and log parsers are hard-deleted
 `{"user.name": "<plain>", "user.password": "<base64 cipher>"}` with no `encrypted` marker.
 A wrong password then returns `401 MD021 Invalid Credentials` with a `login.attempts.left`
 counter — do not brute force, the account locks.
+
+### SNMP community key is `snmp.community`
+
+A credential context of `{"snmp.version": "v2c", "community": "..."}` is accepted with
+`200 created successfully`, but the appliance then polls with an **empty community**. Captured
+with `tcpdump -n udp port 161` on the target while a discovery ran:
+
+```
+IP 172.16.14.71.45080 > 172.20.21.25.161:  C="" GetRequest(28)  .1.3.6.1.2.1.1.2.0
+```
+
+The correct key follows the `snmp.*` convention used by the other fields
+(`snmp.version`, `snmp.security.level`, `snmp.security.user.name`):
+
+```json
+"credential.profile.context": { "snmp.version": "v2c", "snmp.community": "shopverse" }
+```
+
+The HTML form input is named `community`, which is misleading — that is not the API key.
+Because GET redacts secrets, this is invisible from the API and only shows up on the wire.
+
+### Database discoveries need `database` in the context
+
+PostgreSQL and MySQL discoveries fail without it; every working profile on the appliance
+carries one. The context also repeats the type and disables the ICMP pre-check:
+
+```json
+"discovery.context": {"port": 5432, "database": "shopverse",
+                      "ping.check.status": "no", "discovery.object.type": "PostgreSQL"}
+```

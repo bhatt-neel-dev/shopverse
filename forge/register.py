@@ -38,8 +38,9 @@ CREDENTIAL_SPECS = {
     "shopverse-linux-ssh": ("SSH", lambda c: {
         "username": c.get("username", ""), "password": c.get("password", ""),
         "cli.enabled": "no"}),
+    # snmp.community, not community — the latter is accepted then sent empty
     "shopverse-snmp": ("SNMP V1/V2c", lambda c: {
-        "snmp.version": "v2c", "community": c.get("community", "public")}),
+        "snmp.version": "v2c", "snmp.community": c.get("community", "public")}),
     "shopverse-postgres": ("JDBC", lambda c: {
         "username": c.get("username", ""), "password": c.get("password", "")}),
     "shopverse-mysql": ("JDBC", lambda c: {
