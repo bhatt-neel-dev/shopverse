@@ -238,8 +238,11 @@ async def traps_burst(body: TrapBody):
 DEFAULT_DATABASES = ["postgresql", "mysql", "mongodb"]
 
 
-class MotadataTokenBody(BaseModel):
-    token: str | None = None
+class MotadataSettingsBody(BaseModel):
+    url: str | None = Field(None, description="appliance base URL, e.g. https://172.16.14.71")
+    target_host: str | None = Field(None, description="host Motadata should monitor (the VM)")
+    token: str | None = Field(None, description="personal access token")
+    reset: bool = Field(False, description="drop overrides and fall back to env defaults")
 
 
 class MotadataConfigureBody(BaseModel):
@@ -260,11 +263,29 @@ async def motadata_status(databases: str = ",".join(DEFAULT_DATABASES)):
     return await motadata.status({}, dbs)
 
 
-@app.post("/motadata/token")
-async def motadata_token(body: MotadataTokenBody):
-    motadata.set_token(body.token)
-    history.append("motadata.token", {"set": bool(body.token)}, {"has_token": bool(body.token)})
+@app.get("/motadata/settings")
+async def motadata_get_settings():
     return motadata.configured_appliance()
+
+
+@app.post("/motadata/settings")
+async def motadata_set_settings(body: MotadataSettingsBody):
+    result = motadata.set_settings(url=body.url, target_host_value=body.target_host,
+                                   token_value=body.token, reset=body.reset)
+    # never log the token itself
+    history.append("motadata.settings",
+                   {"url": body.url, "target_host": body.target_host,
+                    "token_set": bool(body.token), "reset": body.reset},
+                   {k: v for k, v in result.items() if k != "defaults"})
+    return result
+
+
+@app.post("/motadata/token")
+async def motadata_token(body: MotadataSettingsBody):
+    """Kept for compatibility — same as POST /motadata/settings with only a token."""
+    result = motadata.set_token(body.token)
+    history.append("motadata.token", {"set": bool(body.token)}, {"has_token": result["has_token"]})
+    return result
 
 
 @app.post("/motadata/configure")

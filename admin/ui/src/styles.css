@@ -309,8 +309,16 @@ button.danger:hover {
   display: flex; justify-content: space-between; align-items: center; gap: .75rem;
   font-size: .8rem; color: var(--muted); margin-bottom: .6rem;
 }
-.mota-token { display: flex; gap: .5rem; margin-bottom: .75rem; }
-.mota-token input { flex: 1; }
+.mota-settings {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: .6rem; padding: .7rem; margin-bottom: .8rem;
+  border: 1px solid var(--border); border-radius: 8px; background: rgba(148,163,184,.05);
+}
+.mota-settings label { display: flex; flex-direction: column; gap: .25rem; font-size: .74rem; color: var(--muted); }
+.mota-settings input { width: 100%; }
+.mota-settings-actions { display: flex; align-items: flex-end; gap: .4rem; }
+.mota-hint { grid-column: 1 / -1; margin: 0; font-size: .72rem; color: var(--muted); }
+.mota-overridden { color: #facc15; font-style: normal; font-size: .74rem; }
 .mota-summary {
   display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: .9rem;
 }

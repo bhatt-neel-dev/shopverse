@@ -18,33 +18,96 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 import httpx
 
-APPLIANCE_URL = os.environ.get("MOTADATA_URL", "https://172.16.14.71")
-PAT_ENV = os.environ.get("MOTADATA_PAT", "")
-# The host ShopVerse runs on, as Motadata should reach it. Defaults to this VM's LAN address.
-TARGET_HOST = os.environ.get("MOTADATA_TARGET_HOST", "172.20.21.25")
+# Env values are only defaults — everything here is settable at runtime from the UI so a new
+# appliance (or a moved ShopVerse host) needs no rebuild.
+ENV_DEFAULTS = {
+    "url": os.environ.get("MOTADATA_URL", "https://172.16.14.71"),
+    # The host ShopVerse runs on, as Motadata should reach it.
+    "target_host": os.environ.get("MOTADATA_TARGET_HOST", "172.20.21.25"),
+    "token": os.environ.get("MOTADATA_PAT", ""),
+}
+
+# Survives container restarts; lives on the studio-data volume, never in the image or git.
+SETTINGS_FILE = Path(os.environ.get("STUDIO_DATA_DIR", "/data")) / "motadata.json"
 
 NOT_CONFIGURED, CONFIGURED, ACTIVE, ERROR, UNKNOWN = (
     "not_configured", "configured", "active", "error", "unknown")
 
-_token_override: str | None = None
+_overrides: dict[str, str] = {}
 
 
-def set_token(token: str | None) -> None:
-    """Let the UI supply a PAT at runtime instead of baking it into the image."""
-    global _token_override
-    _token_override = token or None
+def _load_overrides() -> None:
+    try:
+        if SETTINGS_FILE.exists():
+            saved = json.loads(SETTINGS_FILE.read_text())
+            _overrides.update({k: v for k, v in saved.items()
+                               if k in ENV_DEFAULTS and isinstance(v, str) and v})
+    except Exception:  # noqa: BLE001 — a corrupt settings file must not stop the API
+        pass
+
+
+def _save_overrides() -> None:
+    try:
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS_FILE.write_text(json.dumps(_overrides))
+    except Exception:  # noqa: BLE001 — read-only volume just means settings are session-only
+        pass
+
+
+def _setting(key: str) -> str:
+    return _overrides.get(key) or ENV_DEFAULTS[key]
+
+
+def appliance_url() -> str:
+    return _setting("url")
+
+
+def target_host() -> str:
+    return _setting("target_host")
 
 
 def token() -> str:
-    return _token_override or PAT_ENV
+    return _setting("token")
+
+
+def set_settings(url: str | None = None, target_host_value: str | None = None,
+                 token_value: str | None = None, reset: bool = False) -> dict:
+    """Update any subset at runtime. `reset` drops overrides and falls back to env defaults."""
+    if reset:
+        _overrides.clear()
+    for key, value in (("url", url), ("target_host", target_host_value),
+                       ("token", token_value)):
+        if value is None:
+            continue
+        cleaned = value.strip()
+        if cleaned:
+            _overrides[key] = cleaned.rstrip("/") if key == "url" else cleaned
+        else:
+            _overrides.pop(key, None)
+    _save_overrides()
+    return configured_appliance()
+
+
+def set_token(token_value: str | None) -> dict:
+    return set_settings(token_value=token_value)
 
 
 def configured_appliance() -> dict:
-    return {"url": APPLIANCE_URL, "target_host": TARGET_HOST, "has_token": bool(token())}
+    return {
+        "url": appliance_url(),
+        "target_host": target_host(),
+        "has_token": bool(token()),
+        "overridden": sorted(_overrides),
+        "defaults": {"url": ENV_DEFAULTS["url"], "target_host": ENV_DEFAULTS["target_host"]},
+    }
+
+
+_load_overrides()
 
 
 def _archived(row: dict) -> bool:
@@ -54,7 +117,7 @@ def _archived(row: dict) -> bool:
 
 class MotaClient:
     def __init__(self):
-        self.base = APPLIANCE_URL.rstrip("/")
+        self.base = appliance_url().rstrip("/")
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -112,8 +175,8 @@ def _discovery_payload(name, obj_type, category, port, cred_id) -> dict:
     return {
         "discovery.name": name,
         "discovery.type": "ip.address",
-        "discovery.target": TARGET_HOST,
-        "discovery.target.name": TARGET_HOST,
+        "discovery.target": target_host(),
+        "discovery.target.name": target_host(),
         "discovery.category": category,
         "discovery.object.type": obj_type,
         "discovery.context": {"port": port, "ping.check.status": "yes"},

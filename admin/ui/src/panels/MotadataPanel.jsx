@@ -15,6 +15,9 @@ const GROUP_ORDER = ["Credentials", "Discovery", "Log", "Policies"];
 export default function MotadataPanel({ onAction }) {
   const [board, setBoard] = useState(null);
   const [token, setToken] = useState("");
+  const [url, setUrl] = useState("");
+  const [targetHost, setTargetHost] = useState("");
+  const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const { busy, error, result, run } = useRun(onAction);
 
@@ -32,9 +35,27 @@ export default function MotadataPanel({ onAction }) {
     return () => clearInterval(id);
   }, [refresh]);
 
-  const saveToken = () =>
-    run(() => api("/motadata/token", { method: "POST", body: { token } })).then(() => {
+  const saveSettings = () =>
+    run(() =>
+      api("/motadata/settings", {
+        method: "POST",
+        body: {
+          ...(token ? { token } : {}),
+          ...(url ? { url } : {}),
+          ...(targetHost ? { target_host: targetHost } : {}),
+        },
+      }),
+    ).then(() => {
       setToken("");
+      setUrl("");
+      setTargetHost("");
+      setEditing(false);
+      refresh();
+    });
+
+  const resetSettings = () =>
+    run(() => api("/motadata/settings", { method: "POST", body: { reset: true } })).then(() => {
+      setEditing(false);
       refresh();
     });
 
@@ -62,25 +83,58 @@ export default function MotadataPanel({ onAction }) {
     >
       <div className="mota-appliance">
         <span>
-          {board?.appliance?.url || "appliance"}
+          <strong>{board?.appliance?.url || "appliance"}</strong>
           {board?.appliance?.target_host ? ` → monitors ${board.appliance.target_host}` : ""}
+          {board?.appliance?.overridden?.length ? (
+            <em className="mota-overridden"> (custom)</em>
+          ) : null}
         </span>
-        <span className={`api-dot ${board?.appliance?.has_token ? "up" : "down"}`}>
-          {board?.appliance?.has_token ? "token set" : "no token"}
+        <span>
+          <span className={`api-dot ${board?.appliance?.has_token ? "up" : "down"}`}>
+            {board?.appliance?.has_token ? "token set" : "no token"}
+          </span>
+          <button className="ghost" onClick={() => setEditing((v) => !v)}>
+            {editing ? "Close" : "Settings"}
+          </button>
         </span>
       </div>
 
-      {!board?.appliance?.has_token && (
-        <div className="mota-token">
-          <input
-            type="password"
-            placeholder="Personal Access Token (Settings → User Settings)"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-          />
-          <button onClick={saveToken} disabled={busy || !token}>
-            Use token
-          </button>
+      {(editing || !board?.appliance?.has_token) && (
+        <div className="mota-settings">
+          <label>
+            Appliance URL
+            <input
+              placeholder={board?.appliance?.url || "https://172.16.14.71"}
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+          </label>
+          <label>
+            Monitored host
+            <input
+              placeholder={board?.appliance?.target_host || "172.20.21.25"}
+              value={targetHost}
+              onChange={(e) => setTargetHost(e.target.value)}
+            />
+          </label>
+          <label>
+            Personal Access Token
+            <input
+              type="password"
+              placeholder={board?.appliance?.has_token ? "•••••• (set)" : "Settings → User Settings"}
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+            />
+          </label>
+          <div className="mota-settings-actions">
+            <button onClick={saveSettings} disabled={busy || (!token && !url && !targetHost)}>
+              Save
+            </button>
+            <button className="ghost" onClick={resetSettings} disabled={busy}>
+              Reset to defaults
+            </button>
+          </div>
+          <p className="mota-hint">Blank fields keep their current value. Saved settings persist across restarts.</p>
         </div>
       )}
 
