@@ -239,3 +239,27 @@ the call returning 200 does not mean a monitor exists. Poll the discovery result
 Monitors are listed via `POST /api/v1/settings/objects/search` with
 `{"page.number": N, "page.size": 100}` — the result is an **object** (`items`, `total`,
 `total.pages`), not an array, and paging must be walked to find a specific host.
+
+#### Provisioning can silently no-op (observed 2026-08-04 on 172.16.14.71)
+
+`POST /settings/objects/provision` returned `200 "Object provisioning started successfully"`
+for every object, but:
+
+| Profile | object.state after | monitor created |
+|---|---|---|
+| shopverse-postgresql / mysql / mongodb | `PROVISION` | **no** |
+| shopverse-host-linux | stays `UNPROVISION` | no |
+| shopverse-host-snmp | stays `NEW` | no |
+
+The appliance held 441 monitors and **none** for the target IP, so even the objects marked
+`PROVISION` never materialised.
+
+This is **not** a payload problem. Clicking the appliance's own *Add Selected Objects* button
+in its UI produces the identical outcome — `200 … started successfully`, no toast, state
+unchanged. The discovery profile also carries exactly the same field set as other users'
+profiles on the same box that did produce monitors, and no collector field exists on either.
+
+So: a 200 from this endpoint means *queued*, not *done*, and the queue can fail silently.
+Always verify by polling `object.state` **and** confirming the monitor exists via
+`POST /settings/objects/search`. When both stall, the problem is appliance-side (provisioning
+worker / collector), not the request.
