@@ -38,7 +38,7 @@ Missing keys = 0. `<svc>` is the service name below.
 ```
 MYSQL_HOST=mysql MYSQL_DB=shopverse MYSQL_USER=shop MYSQL_PASSWORD=shoppass
 PG_HOST=postgres PG_DB=shopverse PG_USER=shop PG_PASSWORD=shoppass
-MONGO_URL=mongodb://mongo:27017/shopverse
+MONGO_URL=mongodb://shop:shoppass@mongo:27017/shopverse?authSource=admin
 REDIS_URL=redis://redis:6379
 RABBIT_URL=amqp://shop:shoppass@rabbitmq:5672/%2F   # %2F = default vhost "/";
 #   a bare trailing slash means EMPTY vhost and the Java client rejects it

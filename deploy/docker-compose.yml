@@ -9,6 +9,7 @@ services:
       MYSQL_USER: shop
       MYSQL_PASSWORD: shoppass
       MYSQL_ROOT_PASSWORD: rootpass
+    ports: ["${MYSQL_PORT:-3306}:3306"]          # published so Motadata can monitor it
     volumes: [mysql-data:/var/lib/mysql]
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pshoppass", "-ushop"]
@@ -23,6 +24,7 @@ services:
       POSTGRES_DB: shopverse
       POSTGRES_USER: shop
       POSTGRES_PASSWORD: shoppass
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
     volumes: [pg-data:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U shop -d shopverse"]
@@ -33,6 +35,12 @@ services:
   mongo:
     image: mongo:7
     container_name: shopverse-mongo
+    # Auth on: Motadata's MongoDB monitor authenticates, and an unauthenticated
+    # database is not what a real deployment looks like anyway.
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: shop
+      MONGO_INITDB_ROOT_PASSWORD: shoppass
+    ports: ["${MONGO_PORT:-27017}:27017"]
     volumes: [mongo-data:/data/db]
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping:1}).ok"]
@@ -43,6 +51,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: shopverse-redis
+    ports: ["${REDIS_PORT:-6379}:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -55,7 +64,7 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: shop
       RABBITMQ_DEFAULT_PASS: shoppass
-    ports: ["${RABBITMQ_UI_PORT:-15672}:15672"]
+    ports: ["${RABBITMQ_UI_PORT:-15672}:15672", "${RABBITMQ_PORT:-5672}:5672"]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -74,7 +83,7 @@ services:
       PG_DB: shopverse
       PG_USER: shop
       PG_PASSWORD: shoppass
-      MONGO_URL: mongodb://mongo:27017/shopverse
+      MONGO_URL: mongodb://shop:shoppass@mongo:27017/shopverse?authSource=admin
       REDIS_URL: redis://redis:6379
       RABBIT_URL: amqp://shop:shoppass@rabbitmq:5672/%2F
     depends_on:

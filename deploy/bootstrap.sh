@@ -14,12 +14,18 @@ fi
 echo "==> Host telemetry (Phase A: SNMP + syslog forward to the appliance)"
 sudo apt-get update -qq
 sudo apt-get install -y -qq snmpd git curl
-# SNMP v2c read-only, community 'shopverse' — makes this VM a 'Linux (SNMP)' monitor too
+# SNMP v2c read-only, community 'shopverse'. Ubuntu ships snmpd bound to 127.0.0.1, which
+# makes it invisible to the appliance — agentaddress must cover all interfaces.
 sudo tee /etc/snmp/snmpd.conf >/dev/null <<'EOF'
-agentAddress udp:161
-rocommunity shopverse
+agentaddress udp:161,udp6:[::1]:161
+rocommunity shopverse default
+rocommunity6 shopverse default
 sysLocation ShopVerse Lab
 sysContact ops@shopverse.local
+sysServices 72
+# expose the full tree, not just the default system subset
+view   all          included   .1
+access notConfigGroup ""  any       noauth    exact  all    none   none
 EOF
 sudo systemctl enable --now snmpd && sudo systemctl restart snmpd
 

@@ -167,10 +167,13 @@ DISCOVERY_PATH = "/settings/discoveries"
 PARSER_PATH = "/settings/log-parsers"
 POLICY_PATH = "/settings/metric-policies"
 
+# object type, discovery category, port, credential key, database to connect to.
+# PostgreSQL/MySQL refuse a connection without a database name — working discoveries on the
+# appliance all carry one in discovery.context.
 DB_SPECS = {
-    "postgresql": ("PostgreSQL", "Database", 5432, "shopverse-postgres"),
-    "mysql": ("MySQL", "Database", 3306, "shopverse-mysql"),
-    "mongodb": ("MongoDB", "Database", 27017, "shopverse-mongo"),
+    "postgresql": ("PostgreSQL", "Database", 5432, "shopverse-postgres", "shopverse"),
+    "mysql": ("MySQL", "Database", 3306, "shopverse-mysql", "shopverse"),
+    "mongodb": ("MongoDB", "Database", 27017, "shopverse-mongo", "shopverse"),
 }
 
 
@@ -180,7 +183,13 @@ def _cred_payload(name: str, protocol: str, ctx: dict) -> dict:
             "credential.profile.context": ctx}
 
 
-def _discovery_payload(name, obj_type, category, port, cred_id, host) -> dict:
+def _discovery_payload(name, obj_type, category, port, cred_id, host,
+                       database: str = "", ping_check: str = "yes") -> dict:
+    context = {"port": port, "ping.check.status": ping_check,
+               # the appliance's own profiles repeat the type inside the context
+               "discovery.object.type": obj_type}
+    if database:
+        context["database"] = database
     return {
         "discovery.name": name,
         "discovery.type": "ip.address",
@@ -188,7 +197,7 @@ def _discovery_payload(name, obj_type, category, port, cred_id, host) -> dict:
         "discovery.target.name": host,
         "discovery.category": category,
         "discovery.object.type": obj_type,
-        "discovery.context": {"port": port, "ping.check.status": "yes"},
+        "discovery.context": context,
         "discovery.credential.profiles": [cred_id] if cred_id else [],
         "discovery.groups": [],
         "discovery.user.tags": [],
@@ -266,10 +275,13 @@ def build_items(credentials: dict, databases: list[str]) -> list[dict]:
     ]
     for db in databases:
         if db in DB_SPECS:
-            _, _, _, cred_name = DB_SPECS[db]
-            creds.append((cred_name, "JDBC", f"{db} over JDBC",
-                          {"username": credentials.get(f"{db}_user", "shop"),
-                           "password": credentials.get(f"{db}_password", "shoppass")}))
+            _, _, _, cred_name, _ = DB_SPECS[db]
+            ctx = {"username": credentials.get(f"{db}_user", "shop"),
+                   "password": credentials.get(f"{db}_password", "shoppass")}
+            if db == "mongodb":
+                # the root user created by MONGO_INITDB_* lives in the admin database
+                ctx["database"] = "admin"
+            creds.append((cred_name, "JDBC", f"{db} over JDBC", ctx))
 
     for name, protocol, desc, ctx in creds:
         items.append({
@@ -279,22 +291,22 @@ def build_items(credentials: dict, databases: list[str]) -> list[dict]:
         })
 
     targets = [("shopverse-host-linux", "Linux", "Server", 22, "shopverse-linux-ssh",
-                "ShopVerse VM as a Linux monitor"),
+                "ShopVerse VM as a Linux monitor", ""),
                ("shopverse-host-snmp", "Linux (SNMP)", "Network", 161, "shopverse-snmp",
-                "ShopVerse VM over SNMP")]
+                "ShopVerse VM over SNMP", "")]
     for db in databases:
         if db in DB_SPECS:
-            obj_type, category, port, cred_name = DB_SPECS[db]
+            obj_type, category, port, cred_name, database = DB_SPECS[db]
             targets.append((f"shopverse-{db}", obj_type, category, port, cred_name,
-                            f"{obj_type} database monitor"))
+                            f"{obj_type} database monitor", database))
 
-    for name, obj_type, category, port, cred_name, desc in targets:
+    for name, obj_type, category, port, cred_name, desc, database in targets:
         items.append({
             "key": f"discovery:{name}", "label": name, "group": "Discovery", "desc": desc,
             "path": DISCOVERY_PATH, "name_field": "discovery.name", "name": name,
             "payload": None,  # needs the credential id, resolved at create time
             "discovery": {"obj_type": obj_type, "category": category, "port": port,
-                          "cred_name": cred_name},
+                          "cred_name": cred_name, "database": database},
             "depends_on": f"cred:{cred_name}",
         })
 
@@ -439,9 +451,11 @@ async def configure(appliance: dict, databases: list[str], only: str | None = No
                     failed.append({"key": item["key"],
                                    "error": f"credential {d['cred_name']} missing"})
                     continue
-                payload = _discovery_payload(item["name"], d["obj_type"], d["category"],
-                                             d["port"], cred_id,
-                                             appliance.get("target_host", ""))
+                payload = _discovery_payload(
+                    item["name"], d["obj_type"], d["category"], d["port"], cred_id,
+                    appliance.get("target_host", ""), d.get("database", ""),
+                    # DB profiles on the appliance all skip the ICMP pre-check
+                    "no" if d.get("database") else "yes")
 
             result = await client.post(item["path"], payload)
             new_id = result.get("id") if isinstance(result, dict) else None
