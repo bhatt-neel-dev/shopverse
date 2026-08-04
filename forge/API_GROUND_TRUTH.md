@@ -281,3 +281,20 @@ Verified: with unique names, all four monitors appear and poll **Up** —
 Also note `POST /settings/objects/search` accepts a **`search`** term
 (`{"search": "shopverse", "page.size": 100}`). Use it — walking pages client-side is slow and
 easy to get wrong.
+
+### Renaming a live monitor
+
+```
+PUT /api/v1/settings/objects/{id}   {"object.name": "shopverse-mongodb"}
+→ 200 {"message": "Monitor updated successfully", "id": ...}
+```
+
+A partial body is fine — only the supplied keys change, and the monitor keeps polling (status
+stayed `Up` across the rename). Find the id via `POST /settings/objects/search`.
+
+Note the inventory grid's own search body uses **`search.filter`**, not `search`:
+
+```json
+{"search.filter": "172.20.21.25", "filters": {}, "page.size": 50, "page.number": 0,
+ "search.columns": ["object.name","object.ip","object.type","object.host","status", ...]}
+```
