@@ -543,13 +543,13 @@ async def provision(appliance: dict, name: str) -> dict:
     # Every profile targeting one host discovers it under the same object.name (the hostname),
     # so the first provision claims that name and the rest silently no-op — 200 "started
     # successfully", state never leaves UNPROVISION. Qualify the name per profile.
-    suffix = name.replace("shopverse-", "").replace("host-", "")
+    # Name each monitor after its discovery profile. Probes disagree about what a host is
+    # called — MySQL/PostgreSQL report the hostname, MongoDB falls back to the bare IP — so
+    # deriving the name from the discovered object gives inconsistent results.
     renamed = []
-    for obj in pending:
+    for index, obj in enumerate(pending):
         copy = dict(obj)
-        base = str(obj.get("object.name") or obj.get("object.host") or obj.get("object.ip", ""))
-        if suffix and not base.endswith(suffix):
-            copy["object.name"] = f"{base}-{suffix}"
+        copy["object.name"] = name if len(pending) == 1 else f"{name}-{index + 1}"
         renamed.append(copy)
 
     await client.post("/settings/objects/provision",
