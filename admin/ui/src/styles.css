@@ -348,3 +348,36 @@ button.danger:hover {
 .chip.not_configured { background: rgba(148,163,184,.12); color: #94a3b8; border-color: rgba(148,163,184,.3); }
 .chip.error          { background: rgba(239,68,68,.15);  color: #f87171; border-color: rgba(239,68,68,.35); }
 .chip.unknown        { background: rgba(234,179,8,.12);  color: #facc15; border-color: rgba(234,179,8,.3); }
+
+/* --- appliance registry + device view --- */
+.appl-list { display: flex; flex-direction: column; gap: .5rem; margin-bottom: .9rem; }
+.appl-card {
+  display: flex; align-items: center; gap: .75rem; padding: .6rem .7rem;
+  border: 1px solid var(--border); border-radius: 8px; background: rgba(148,163,184,.04);
+}
+.appl-card:hover { border-color: rgba(96,165,250,.5); }
+.appl-main { display: flex; flex-direction: column; gap: .15rem; flex: 1; cursor: pointer; }
+.appl-url { font-size: .78rem; color: var(--muted); }
+.appl-meta { display: flex; align-items: center; gap: .5rem; font-size: .74rem; color: var(--muted); }
+.appl-actions { display: flex; gap: .35rem; }
+
+.device-bar {
+  display: flex; align-items: center; gap: .75rem; margin-bottom: 1rem;
+  padding-bottom: .6rem; border-bottom: 1px solid var(--border);
+}
+.device-tabs { margin-left: auto; display: flex; gap: .35rem; }
+
+/* --- ingestion --- */
+.ing-row { padding: .7rem 0; border-top: 1px solid var(--border); }
+.ing-row:first-of-type { border-top: none; }
+.ing-head { display: flex; justify-content: space-between; align-items: flex-start; gap: .75rem; }
+.ing-pipeline {
+  margin-left: .5rem; font-size: .7rem; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 999px; padding: .05rem .45rem;
+}
+.ing-desc { margin: .2rem 0 .5rem; font-size: .76rem; color: var(--muted); }
+.ing-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .5rem; }
+.ing-controls label { display: flex; flex-direction: column; gap: .2rem; font-size: .72rem; color: var(--muted); }
+.ing-controls input { width: 90px; }
+.ing-controls select { min-width: 84px; }
+.ing-divider { width: 1px; align-self: stretch; background: var(--border); margin: 0 .3rem; }

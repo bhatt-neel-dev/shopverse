@@ -110,19 +110,28 @@ def configured_appliance() -> dict:
 _load_overrides()
 
 
+def _appliance_public(appliance: dict) -> dict:
+    return {"id": appliance.get("id"), "name": appliance.get("name"),
+            "url": appliance.get("url"), "target_host": appliance.get("target_host"),
+            "has_token": bool(appliance.get("token"))}
+
+
 def _archived(row: dict) -> bool:
     """Deleting a policy only archives it; an archived row must read as not configured."""
     return str(row.get("policy.archived", "no")).lower() == "yes"
 
 
 class MotaClient:
-    def __init__(self):
-        self.base = appliance_url().rstrip("/")
+    """Scoped to one appliance: {url, token, target_host}."""
+
+    def __init__(self, appliance: dict):
+        self.appliance = appliance
+        self.base = str(appliance["url"]).rstrip("/")
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
             verify=False, timeout=httpx.Timeout(60.0),
-            headers={"Authorization": f"Bearer {token()}",
+            headers={"Authorization": f"Bearer {self.appliance.get('token', '')}",
                      "Content-Type": "application/json"})
 
     async def get(self, path: str) -> list[dict]:
@@ -171,12 +180,12 @@ def _cred_payload(name: str, protocol: str, ctx: dict) -> dict:
             "credential.profile.context": ctx}
 
 
-def _discovery_payload(name, obj_type, category, port, cred_id) -> dict:
+def _discovery_payload(name, obj_type, category, port, cred_id, host) -> dict:
     return {
         "discovery.name": name,
         "discovery.type": "ip.address",
-        "discovery.target": target_host(),
-        "discovery.target.name": target_host(),
+        "discovery.target": host,
+        "discovery.target.name": host,
         "discovery.category": category,
         "discovery.object.type": obj_type,
         "discovery.context": {"port": port, "ping.check.status": "yes"},
@@ -347,11 +356,12 @@ def _state_of(item: dict, row: dict | None) -> tuple[str, str]:
     return CONFIGURED, "exists"
 
 
-async def status(credentials: dict, databases: list[str]) -> dict:
+async def status(appliance: dict, databases: list[str], credentials: dict | None = None) -> dict:
+    credentials = credentials or {}
     items = build_items(credentials, databases)
-    if not token():
+    if not appliance.get("token"):
         return {
-            "appliance": configured_appliance(),
+            "appliance": _appliance_public(appliance),
             "reachable": False,
             "message": "no personal access token set — add one to query the appliance",
             "items": [{**{k: i[k] for k in ("key", "label", "group", "desc")},
@@ -359,7 +369,7 @@ async def status(credentials: dict, databases: list[str]) -> dict:
             "summary": {UNKNOWN: len(items)},
         }
 
-    client = MotaClient()
+    client = MotaClient(appliance)
     cache: dict[str, list[dict]] = {}
     reachable = True
     message = ""
@@ -385,16 +395,17 @@ async def status(credentials: dict, databases: list[str]) -> dict:
     summary: dict[str, int] = {}
     for entry in out:
         summary[entry["state"]] = summary.get(entry["state"], 0) + 1
-    return {"appliance": configured_appliance(), "reachable": reachable,
+    return {"appliance": _appliance_public(appliance), "reachable": reachable,
             "message": message, "items": out, "summary": summary}
 
 
-async def configure(credentials: dict, databases: list[str], only: str | None = None) -> dict:
-    """Create missing objects. `only` restricts to a single item key."""
-    if not token():
-        raise RuntimeError("no personal access token set")
-
-    client = MotaClient()
+async def configure(appliance: dict, databases: list[str], only: str | None = None,
+                    credentials: dict | None = None) -> dict:
+    """Create missing objects on one appliance. `only` restricts to a single item key."""
+    if not appliance.get("token"):
+        raise RuntimeError("no personal access token set for this appliance")
+    credentials = credentials or {}
+    client = MotaClient(appliance)
     items = build_items(credentials, databases)
     cred_ids: dict[str, int] = {}
     created, skipped, failed = [], [], []
@@ -429,7 +440,8 @@ async def configure(credentials: dict, databases: list[str], only: str | None = 
                                    "error": f"credential {d['cred_name']} missing"})
                     continue
                 payload = _discovery_payload(item["name"], d["obj_type"], d["category"],
-                                             d["port"], cred_id)
+                                             d["port"], cred_id,
+                                             appliance.get("target_host", ""))
 
             result = await client.post(item["path"], payload)
             new_id = result.get("id") if isinstance(result, dict) else None
@@ -443,11 +455,11 @@ async def configure(credentials: dict, databases: list[str], only: str | None = 
             "counts": {"created": len(created), "skipped": len(skipped), "failed": len(failed)}}
 
 
-async def run_discovery(name: str) -> dict:
+async def run_discovery(appliance: dict, name: str) -> dict:
     """Kick off a discovery profile so its monitors get provisioned."""
-    if not token():
-        raise RuntimeError("no personal access token set")
-    client = MotaClient()
+    if not appliance.get("token"):
+        raise RuntimeError("no personal access token set for this appliance")
+    client = MotaClient(appliance)
     row = await client.find(DISCOVERY_PATH, "discovery.name", name)
     if not row:
         raise RuntimeError(f"discovery profile {name!r} not found")

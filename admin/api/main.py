@@ -8,9 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+import appliances
 import chaos
 import coverage
 import history
+import ingest
 import injection
 import journeys
 import loadspike
@@ -233,19 +235,70 @@ async def traps_burst(body: TrapBody):
     return result
 
 
-# ---- Motadata auto-configuration --------------------------------------------
+# ---- appliances -------------------------------------------------------------
 
 DEFAULT_DATABASES = ["postgresql", "mysql", "mongodb"]
 
 
-class MotadataSettingsBody(BaseModel):
-    url: str | None = Field(None, description="appliance base URL, e.g. https://172.16.14.71")
-    target_host: str | None = Field(None, description="host Motadata should monitor (the VM)")
-    token: str | None = Field(None, description="personal access token")
-    reset: bool = Field(False, description="drop overrides and fall back to env defaults")
+class ApplianceBody(BaseModel):
+    name: str = ""
+    url: str
+    target_host: str = ""
+    token: str = ""
 
 
-class MotadataConfigureBody(BaseModel):
+class AppliancePatch(BaseModel):
+    name: str | None = None
+    url: str | None = None
+    target_host: str | None = None
+    token: str | None = None
+
+
+def _appliance_or_404(appliance_id: str) -> dict:
+    try:
+        return appliances.get(appliance_id)
+    except KeyError:
+        raise HTTPException(404, f"no appliance {appliance_id!r}")
+
+
+@app.get("/appliances")
+async def list_appliances():
+    return appliances.listing()
+
+
+@app.post("/appliances")
+async def create_appliance(body: ApplianceBody):
+    if not body.url.strip():
+        raise HTTPException(400, "url is required")
+    item = appliances.add(body.name, body.url, body.target_host, body.token)
+    history.append("appliance.add", {"name": body.name, "url": body.url,
+                                     "target_host": body.target_host,
+                                     "token_set": bool(body.token)}, item)
+    return item
+
+
+@app.patch("/appliances/{appliance_id}")
+async def patch_appliance(appliance_id: str, body: AppliancePatch):
+    _appliance_or_404(appliance_id)
+    item = appliances.update(appliance_id, **body.model_dump())
+    history.append("appliance.update",
+                   {"id": appliance_id, **{k: v for k, v in body.model_dump().items()
+                                           if k != "token"},
+                    "token_set": bool(body.token)}, item)
+    return item
+
+
+@app.delete("/appliances/{appliance_id}")
+async def delete_appliance(appliance_id: str):
+    _appliance_or_404(appliance_id)
+    appliances.remove(appliance_id)
+    history.append("appliance.remove", {"id": appliance_id}, {"removed": True})
+    return {"removed": appliance_id}
+
+
+# ---- per-appliance configuration --------------------------------------------
+
+class ConfigureBody(BaseModel):
     only: str | None = Field(None, description="configure just this item key; omit for all")
     databases: list[str] = DEFAULT_DATABASES
     ssh_user: str = "motadata"
@@ -257,59 +310,89 @@ class MotadataConfigureBody(BaseModel):
                 "snmp_community": self.snmp_community}
 
 
-@app.get("/motadata/status")
-async def motadata_status(databases: str = ",".join(DEFAULT_DATABASES)):
+@app.get("/appliances/{appliance_id}/status")
+async def appliance_status(appliance_id: str, databases: str = ",".join(DEFAULT_DATABASES)):
+    appliance = _appliance_or_404(appliance_id)
     dbs = [d.strip() for d in databases.split(",") if d.strip()]
-    return await motadata.status({}, dbs)
+    return await motadata.status(appliance, dbs)
 
 
-@app.get("/motadata/settings")
-async def motadata_get_settings():
-    return motadata.configured_appliance()
-
-
-@app.post("/motadata/settings")
-async def motadata_set_settings(body: MotadataSettingsBody):
-    result = motadata.set_settings(url=body.url, target_host_value=body.target_host,
-                                   token_value=body.token, reset=body.reset)
-    # never log the token itself
-    history.append("motadata.settings",
-                   {"url": body.url, "target_host": body.target_host,
-                    "token_set": bool(body.token), "reset": body.reset},
-                   {k: v for k, v in result.items() if k != "defaults"})
-    return result
-
-
-@app.post("/motadata/token")
-async def motadata_token(body: MotadataSettingsBody):
-    """Kept for compatibility — same as POST /motadata/settings with only a token."""
-    result = motadata.set_token(body.token)
-    history.append("motadata.token", {"set": bool(body.token)}, {"has_token": result["has_token"]})
-    return result
-
-
-@app.post("/motadata/configure")
-async def motadata_configure(body: MotadataConfigureBody):
+@app.post("/appliances/{appliance_id}/configure")
+async def appliance_configure(appliance_id: str, body: ConfigureBody):
+    appliance = _appliance_or_404(appliance_id)
     try:
-        result = await motadata.configure(body.credentials(), body.databases, body.only)
+        result = await motadata.configure(appliance, body.databases, body.only, body.credentials())
     except RuntimeError as e:
         raise HTTPException(400, str(e))
     except Exception as e:  # noqa: BLE001 — appliance unreachable etc.
         raise HTTPException(502, f"appliance error: {e}")
-    history.append("motadata.configure", body.model_dump(), result["counts"])
+    history.append("appliance.configure", {"id": appliance_id, **body.model_dump()},
+                   result["counts"])
     return result
 
 
-@app.post("/motadata/discovery/{name}/run")
-async def motadata_run_discovery(name: str):
+@app.post("/appliances/{appliance_id}/discovery/{name}/run")
+async def appliance_run_discovery(appliance_id: str, name: str):
+    appliance = _appliance_or_404(appliance_id)
     try:
-        result = await motadata.run_discovery(name)
+        await motadata.run_discovery(appliance, name)
     except RuntimeError as e:
         raise HTTPException(400, str(e))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"appliance error: {e}")
-    history.append("motadata.discovery.run", {"name": name}, result or {"started": True})
+    history.append("appliance.discovery.run", {"id": appliance_id, "name": name},
+                   {"started": True})
     return {"started": name}
+
+
+# ---- ingestion --------------------------------------------------------------
+
+class BurstBody(BaseModel):
+    type: str
+    count: int = Field(100, ge=1, le=100_000)
+    timeframe: str = "5m"
+
+
+class ContinuousBody(BaseModel):
+    type: str
+    enabled: bool = True
+    per_minute: int = Field(60, ge=1, le=6000)
+
+
+@app.get("/ingest")
+async def ingest_status():
+    return ingest.status()
+
+
+@app.post("/ingest/burst")
+async def ingest_burst(body: BurstBody):
+    try:
+        job = ingest.start_burst(body.type, body.count, body.timeframe)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    history.append("ingest.burst", body.model_dump(), {"job": job["id"]})
+    return job
+
+
+@app.post("/ingest/burst/{job_id}/stop")
+async def ingest_burst_stop(job_id: str):
+    try:
+        job = ingest.stop_burst(job_id)
+    except KeyError:
+        raise HTTPException(404, f"no job {job_id!r}")
+    history.append("ingest.burst.stop", {"job": job_id}, {"state": job["state"]})
+    return job
+
+
+@app.post("/ingest/continuous")
+async def ingest_continuous(body: ContinuousBody):
+    try:
+        entry = ingest.set_continuous(body.type, body.enabled, body.per_minute)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    history.append("ingest.continuous", body.model_dump(),
+                   {"enabled": entry["enabled"]})
+    return entry
 
 
 # ---- coverage + history -----------------------------------------------------
