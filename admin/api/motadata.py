@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -346,7 +347,14 @@ def _state_of(item: dict, row: dict | None) -> tuple[str, str]:
         if row.get("state") == "Running":
             return ACTIVE, "discovery running"
         if found:
-            return ACTIVE, f"{found} object(s) discovered"
+            provisioned = item.get("_provisioned")
+            if provisioned is None:
+                return ACTIVE, f"{found} object(s) discovered"
+            if provisioned == 0:
+                return CONFIGURED, f"{found} discovered, none provisioned yet"
+            if provisioned < found:
+                return ACTIVE, f"{provisioned}/{found} provisioned"
+            return ACTIVE, f"{found} provisioned"
         if failed:
             return ERROR, f"{failed} target(s) failed — check credentials/reachability"
         if status:
@@ -401,6 +409,13 @@ async def status(appliance: dict, databases: list[str], credentials: dict | None
         row = next((r for r in cache[path]
                     if isinstance(r, dict) and r.get(item["name_field"]) == item["name"]
                     and not _archived(r)), None)
+        if row is not None and item["group"] == "Discovery" and row.get("id"):
+            try:
+                objs = await client.get(f"{DISCOVERY_PATH}/{row['id']}/result")
+                item["_provisioned"] = sum(
+                    1 for o in objs if str(o.get("object.state", "")).upper() == "PROVISION")
+            except Exception:  # noqa: BLE001 — counts are a nicety, not worth failing the board
+                pass
         state, detail = (_state_of(item, row) if reachable or cache[path]
                          else (UNKNOWN, "appliance unreachable"))
         out.append({**{k: item[k] for k in ("key", "label", "group", "desc")},
@@ -470,6 +485,47 @@ async def configure(appliance: dict, databases: list[str], only: str | None = No
 
     return {"created": created, "skipped": skipped, "failed": failed,
             "counts": {"created": len(created), "skipped": len(skipped), "failed": len(failed)}}
+
+
+async def discovery_results(appliance: dict, name: str) -> tuple[int, list[dict]]:
+    """(discovery id, discovered objects) for a profile."""
+    client = MotaClient(appliance)
+    row = await client.find(DISCOVERY_PATH, "discovery.name", name)
+    if not row:
+        raise RuntimeError(f"discovery profile {name!r} not found")
+    return row["id"], await client.get(f"{DISCOVERY_PATH}/{row['id']}/result")
+
+
+async def provision(appliance: dict, name: str) -> dict:
+    """Turn a profile's discovered objects into monitors.
+
+    Discovery only *finds* things; nothing is monitored until its objects are provisioned.
+    The appliance expects the result rows echoed back verbatim alongside the discovery id.
+    """
+    if not appliance.get("token"):
+        raise RuntimeError("no personal access token set for this appliance")
+    client = MotaClient(appliance)
+    discovery_id, objects = await discovery_results(appliance, name)
+    pending = [o for o in objects if str(o.get("object.state", "")).upper() != "PROVISION"]
+    if not pending:
+        return {"discovery": name, "provisioned": 0, "already": len(objects)}
+    await client.post("/settings/objects/provision",
+                      {"params": pending, "id": discovery_id,
+                       "ui.event.uuid": uuid.uuid4().hex})
+    return {"discovery": name, "provisioned": len(pending), "already": len(objects) - len(pending)}
+
+
+async def provision_all(appliance: dict, databases: list[str]) -> dict:
+    results, errors = [], []
+    for item in build_items({}, databases):
+        if item["group"] != "Discovery":
+            continue
+        try:
+            results.append(await provision(appliance, item["name"]))
+        except Exception as e:  # noqa: BLE001 — one profile must not stop the rest
+            errors.append({"discovery": item["name"], "error": str(e)[:200]})
+    return {"results": results, "errors": errors,
+            "provisioned": sum(r["provisioned"] for r in results)}
 
 
 async def run_discovery(appliance: dict, name: str) -> dict:

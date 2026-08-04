@@ -216,3 +216,26 @@ carries one. The context also repeats the type and disables the ICMP pre-check:
 "discovery.context": {"port": 5432, "database": "shopverse",
                       "ping.check.status": "no", "discovery.object.type": "PostgreSQL"}
 ```
+
+### Provisioning — discovery alone creates nothing
+
+A discovery profile only *finds* objects; each one stays `object.state: "UNPROVISION"` (or
+`"NEW"`) until it is provisioned, and **no monitor exists until then**. Two calls:
+
+```
+GET  /api/v1/settings/discoveries/{id}/result     → the discovered objects
+POST /api/v1/settings/objects/provision
+     {"params": [ <those objects, echoed back verbatim> ],
+      "id": <discovery id>, "ui.event.uuid": "<uuid>"}
+```
+
+The result rows must be sent back unchanged — they carry `object.ip`, `object.host`,
+`object.type`, `object.context`, `object.credential.profile` and the internal `id`.
+
+The response is **`200 "Object provisioning started successfully"` — it is asynchronous**, so
+the call returning 200 does not mean a monitor exists. Poll the discovery result and watch
+`object.state` flip to `PROVISION`.
+
+Monitors are listed via `POST /api/v1/settings/objects/search` with
+`{"page.number": N, "page.size": 100}` — the result is an **object** (`items`, `total`,
+`total.pages`), not an array, and paging must be walked to find a specific host.

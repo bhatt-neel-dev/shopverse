@@ -37,6 +37,13 @@ export default function MotadataPanel({ appliance, onAction }) {
   const configureOne = (key) =>
     run(() => api(`/appliances/${appliance.id}/configure`, { method: "POST", body: { only: key } })).then(refresh);
 
+  const provisionAll = () =>
+    run(() => api(`/appliances/${appliance.id}/provision`, { method: "POST" })).then(refresh);
+
+  const provision = (label) =>
+    run(() => api(`/appliances/${appliance.id}/discovery/${encodeURIComponent(label)}/provision`, { method: "POST" }))
+      .then(refresh);
+
   const runDiscovery = (label) =>
     run(() => api(`/appliances/${appliance.id}/discovery/${encodeURIComponent(label)}/run`, { method: "POST" }))
       .then(refresh);
@@ -72,7 +79,10 @@ export default function MotadataPanel({ appliance, onAction }) {
           ) : null,
         )}
         <button onClick={configureAll} disabled={busy || !board?.appliance?.has_token}>
-          {busy ? "Configuring…" : "Configure everything"}
+          {busy ? "Working…" : "Configure everything"}
+        </button>
+        <button onClick={provisionAll} disabled={busy || !board?.appliance?.has_token}>
+          Provision all
         </button>
         <button className="ghost" onClick={refresh} disabled={loading}>
           {loading ? "…" : "Refresh"}
@@ -103,9 +113,14 @@ export default function MotadataPanel({ appliance, onAction }) {
                       </button>
                     )}
                     {group === "Discovery" && item.state !== "not_configured" && (
-                      <button className="ghost" onClick={() => runDiscovery(item.label)} disabled={busy}>
-                        Run
-                      </button>
+                      <>
+                        <button className="ghost" onClick={() => runDiscovery(item.label)} disabled={busy}>
+                          Run
+                        </button>
+                        <button className="ghost" onClick={() => provision(item.label)} disabled={busy}>
+                          Provision
+                        </button>
+                      </>
                     )}
                   </td>
                 </tr>

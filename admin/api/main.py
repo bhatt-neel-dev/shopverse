@@ -345,6 +345,33 @@ async def appliance_run_discovery(appliance_id: str, name: str):
     return {"started": name}
 
 
+@app.post("/appliances/{appliance_id}/discovery/{name}/provision")
+async def appliance_provision(appliance_id: str, name: str):
+    appliance = _appliance_or_404(appliance_id)
+    try:
+        result = await motadata.provision(appliance, name)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"appliance error: {e}")
+    history.append("appliance.provision", {"id": appliance_id, "name": name}, result)
+    return result
+
+
+@app.post("/appliances/{appliance_id}/provision")
+async def appliance_provision_all(appliance_id: str, databases: str = ",".join(DEFAULT_DATABASES)):
+    appliance = _appliance_or_404(appliance_id)
+    dbs = [d.strip() for d in databases.split(",") if d.strip()]
+    try:
+        result = await motadata.provision_all(appliance, dbs)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"appliance error: {e}")
+    history.append("appliance.provision.all", {"id": appliance_id}, result["provisioned"])
+    return result
+
+
 # ---- ingestion --------------------------------------------------------------
 
 class BurstBody(BaseModel):
