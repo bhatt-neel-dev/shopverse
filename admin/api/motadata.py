@@ -16,6 +16,7 @@ States:
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -46,6 +47,11 @@ def configured_appliance() -> dict:
     return {"url": APPLIANCE_URL, "target_host": TARGET_HOST, "has_token": bool(token())}
 
 
+def _archived(row: dict) -> bool:
+    """Deleting a policy only archives it; an archived row must read as not configured."""
+    return str(row.get("policy.archived", "no")).lower() == "yes"
+
+
 class MotaClient:
     def __init__(self):
         self.base = APPLIANCE_URL.rstrip("/")
@@ -74,7 +80,7 @@ class MotaClient:
 
     async def find(self, path: str, field: str, value: str) -> dict | None:
         for row in await self.get(path):
-            if isinstance(row, dict) and row.get(field) == value:
+            if isinstance(row, dict) and row.get(field) == value and not _archived(row):
                 return row
         return None
 
@@ -146,16 +152,28 @@ def _policy_payload(name, metric, condition, threshold) -> dict:
     }
 
 
+# A representative ShopVerse log line (docs/CONTRACTS.md). The API derives the parser from this
+# sample, and rejects the create without it: 400 MD022 "Event is a required field".
+_PARSER_SAMPLE = {
+    "ts": "2026-08-04T10:00:00.123Z", "level": "INFO", "svc": "catalog",
+    "msg": "GET /products 200", "trace_id": "3f1c9a52-0d2b-4f77-9a1e-6c2f0b8d4e11",
+    "method": "GET", "path": "/products", "status": 200, "latency_ms": 12,
+    "order_id": 1024, "user_id": 777,
+}
+
 LOG_PARSER_PAYLOAD = {
     "log.parser.name": "ShopVerse JSON",
     "log.parser.type": "json",
+    "log.parser.event": json.dumps(_PARSER_SAMPLE),
     "log.parser.source.type": "Other",
     "log.parser.condition": "all",
     "log.parser.condition.keywords": [],
+    "log.parser.upload": "no",
     "log.parser.date.time.format": "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
     "log.parser.date.time.formatter.type": "formatter",
     "log.parser.fields": [
-        {"log.parser.field.name": f, "log.parser.field.type": t, "log.parser.field.value": ""}
+        {"log.parser.field.name": f, "log.parser.field.type": t,
+         "log.parser.field.value": str(_PARSER_SAMPLE[f])}
         for f, t in [("ts", "timestamp"), ("level", "none"), ("svc", "none"), ("msg", "none"),
                      ("trace_id", "none"), ("status", "none"), ("latency_ms", "none"),
                      ("order_id", "none"), ("user_id", "none")]
@@ -293,7 +311,8 @@ async def status(credentials: dict, databases: list[str]) -> dict:
                 reachable = False
                 message = f"{type(e).__name__} querying {path}"
         row = next((r for r in cache[path]
-                    if isinstance(r, dict) and r.get(item["name_field"]) == item["name"]), None)
+                    if isinstance(r, dict) and r.get(item["name_field"]) == item["name"]
+                    and not _archived(r)), None)
         state, detail = (_state_of(item, row) if reachable or cache[path]
                          else (UNKNOWN, "appliance unreachable"))
         out.append({**{k: item[k] for k in ("key", "label", "group", "desc")},

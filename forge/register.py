@@ -48,6 +48,14 @@ CREDENTIAL_SPECS = {
         "username": c.get("username", ""), "password": c.get("password", "")}),
 }
 
+# A representative ShopVerse log line (docs/CONTRACTS.md), required by the parser create.
+PARSER_SAMPLE = {
+    "ts": "2026-08-04T10:00:00.123Z", "level": "INFO", "svc": "catalog",
+    "msg": "GET /products 200", "trace_id": "3f1c9a52-0d2b-4f77-9a1e-6c2f0b8d4e11",
+    "method": "GET", "path": "/products", "status": 200, "latency_ms": 12,
+    "order_id": 1024, "user_id": 777,
+}
+
 # Baseline policies. entities=[] means "all monitors".
 POLICIES = [
     ("shopverse-cpu-critical", "Metric Threshold", "system.cpu.percent", ">=", "85"),
@@ -93,6 +101,9 @@ class Motadata:
 def ensure(md: Motadata, path: str, name_field: str, name: str, payload: dict, kind: str):
     """Create `payload` unless an object with the same name exists. Returns its id (or None)."""
     for row in (md.get_safe(path) if not md.dry_run else []):
+        # Deleting a policy only archives it; an archived row must not count as existing.
+        if str(row.get("policy.archived", "no")).lower() == "yes":
+            continue
         if isinstance(row, dict) and row.get(name_field) == name:
             print(f"    = {kind} '{name}' exists (id {row.get('id')})")
             return row.get("id")
@@ -175,15 +186,19 @@ def register_log_parser(md: Motadata, cfg: dict) -> int | None:
     payload = {
         "log.parser.name": "ShopVerse JSON",
         "log.parser.type": "json",
+        # The API derives the parser from this sample line and rejects the create without it
+        # (400 MD022 "Event is a required field").
+        "log.parser.event": json.dumps(PARSER_SAMPLE),
         "log.parser.source.type": "Other",
         "log.parser.condition": "all",
         "log.parser.condition.keywords": [],
+        "log.parser.upload": "no",
         "log.parser.date.time.format": "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
         "log.parser.date.time.formatter.type": "formatter",
         # matches the one-JSON-line-per-request schema in docs/CONTRACTS.md
         "log.parser.fields": [
             {"log.parser.field.name": f, "log.parser.field.type": t,
-             "log.parser.field.value": ""}
+             "log.parser.field.value": str(PARSER_SAMPLE[f])}
             for f, t in [("ts", "timestamp"), ("level", "none"), ("svc", "none"),
                          ("msg", "none"), ("trace_id", "none"), ("status", "none"),
                          ("latency_ms", "none"), ("order_id", "none"), ("user_id", "none")]

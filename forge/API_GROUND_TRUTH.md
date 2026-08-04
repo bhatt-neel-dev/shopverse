@@ -135,3 +135,54 @@ Types: `http/https | ssh | powershell | database`. Parsers/runbooks referenced *
 4. log parsers → capture ids → log collectors (reference parser ids)
 5. policies (reference metrics; entities empty = all monitors)
 6. trap listeners / RUM+APM apps — endpoints TBD
+
+---
+
+## Write-path findings (verified 2026-08-04 by creating + deleting real objects on 172.16.14.71)
+
+All four payload shapes below were **POSTed for real** and returned `200 … created successfully`,
+then deleted. Create responses put the new id at the **top level** of the body
+(`{"response-code":200,"status":"succeed","message":"…","id":113285797781}`), not under `result`.
+
+| Object | Endpoint | Result |
+|---|---|---|
+| Credential profile | `POST /settings/credential-profiles` | works as documented above |
+| Discovery profile | `POST /settings/discoveries` | works; `discovery.credential.profiles` must hold the real credential **id** |
+| Metric policy | `POST /settings/metric-policies` | works as documented above |
+| Log parser | `POST /settings/log-parsers` | **needed one extra field** — see below |
+
+### Log parser requires `log.parser.event`
+
+Without it the API rejects the create:
+
+```
+400 MD022  "Missing information: Event is a required field"
+```
+
+`log.parser.event` is a **sample log line** the parser is derived from. For the ShopVerse JSON
+schema, send one representative line, and give each entry in `log.parser.fields` the matching
+`log.parser.field.value` taken from that sample:
+
+```json
+"log.parser.event": "{\"ts\":\"2026-08-04T10:00:00.123Z\",\"level\":\"INFO\",\"svc\":\"catalog\", … }",
+"log.parser.upload": "no",
+"log.parser.fields": [
+  {"log.parser.field.name":"ts","log.parser.field.type":"timestamp","log.parser.field.value":"2026-08-04T10:00:00.123Z"},
+  {"log.parser.field.name":"svc","log.parser.field.type":"none","log.parser.field.value":"catalog"}
+]
+```
+
+### DELETE on a policy is a soft delete
+
+`DELETE /settings/metric-policies/{id}` returns `200 … deleted successfully`, but the row stays in
+`GET /settings/metric-policies` with `"policy.archived": "yes"`. Existence checks must therefore
+**ignore archived rows**, or a re-run will think an archived policy is still configured and skip
+recreating it. Credential profiles, discoveries and log parsers are hard-deleted and disappear.
+
+### Encrypted login (build 8.2.7+)
+
+`POST /api/v1/token` with a plaintext password fails `400`. Fetch `GET /api/v1/login-metadata`
+→ `public.key` (PEM), encrypt the password with **RSA-OAEP-SHA256**, base64 it, and send
+`{"user.name": "<plain>", "user.password": "<base64 cipher>"}` with no `encrypted` marker.
+A wrong password then returns `401 MD021 Invalid Credentials` with a `login.attempts.left`
+counter — do not brute force, the account locks.
